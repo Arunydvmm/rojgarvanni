@@ -1,0 +1,6 @@
+{
+  "name": "RozgarVaani - India Government Job Portal",
+  "description": "Government Job Information Portal for India featuring structured job alerts, exam results, admit cards, answer keys, and AI verification pipeline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

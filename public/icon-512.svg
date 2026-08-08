@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="100" fill="#0f172a"/>
+  <circle cx="256" cy="256" r="200" fill="#1e293b" stroke="#f59e0b" stroke-width="12"/>
+  <path d="M256 120 L270 200 L350 210 L285 260 L305 340 L256 295 L207 340 L227 260 L162 210 L242 200 Z" fill="#f59e0b"/>
+  <text x="256" y="420" font-family="Arial, sans-serif" font-size="42" font-weight="bold" fill="#ffffff" text-anchor="middle">ROZGAR VAANI</text>
+</svg>

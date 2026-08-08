@@ -1,0 +1,102 @@
+{
+  "_comment": "Central NVIDIA agent configuration. API key is NEVER stored here — loaded from NVIDIA_API_KEY env var only.",
+  "provider": "nvidia",
+  "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+  "base_url": "https://integrate.api.nvidia.com/v1",
+  "model_display_name": "NVIDIA Nemotron Nano 9B",
+  "prompt_version": "1.0.0",
+  "defaults": {
+    "temperature": 0.2,
+    "max_tokens": 2048,
+    "top_p": 0.9,
+    "timeout_ms": 30000,
+    "max_retries": 3,
+    "retry_delay_ms": 1500
+  },
+  "agents": {
+    "discovery": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Detects whether raw text is a genuine government recruitment notification",
+      "temperature": 0.1,
+      "max_tokens": 512
+    },
+    "classification": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Classifies job category, qualification level, and recruiting body",
+      "temperature": 0.1,
+      "max_tokens": 512
+    },
+    "extraction": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Extracts all structured fields from the notification text",
+      "temperature": 0.2,
+      "max_tokens": 2048
+    },
+    "normalization": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Normalizes dates, salary figures, fee amounts, and enums to standard formats",
+      "temperature": 0.1,
+      "max_tokens": 1024
+    },
+    "duplicate": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Checks for duplicate or near-duplicate notifications already in the database",
+      "temperature": 0.1,
+      "max_tokens": 512
+    },
+    "enrichment": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Enriches extracted data with age-relaxation rules, application steps, and eligibility details",
+      "temperature": 0.3,
+      "max_tokens": 1024
+    },
+    "content": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Generates the candidate-facing overview, how-to-apply steps, and summary content",
+      "temperature": 0.5,
+      "max_tokens": 1024
+    },
+    "seo": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Generates slug, meta title, meta description, keywords, and structured data",
+      "temperature": 0.3,
+      "max_tokens": 512
+    },
+    "verification": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Hard-gate verifier: cross-checks every extracted field against the original source evidence",
+      "temperature": 0.0,
+      "max_tokens": 1024
+    },
+    "quality": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Quality control: scores completeness, consistency, and readability of the final record",
+      "temperature": 0.1,
+      "max_tokens": 512
+    },
+    "draft": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Assembles the final GovtJobDraft database record from all agent outputs",
+      "temperature": 0.1,
+      "max_tokens": 2048
+    },
+    "final_qa": {
+      "enabled": true,
+      "version": "1.0.0",
+      "description": "Final QA + Auto-Fix agent: inspects all previous outputs, fixes safe issues, routes unsolvable issues back",
+      "temperature": 0.0,
+      "max_tokens": 1024
+    }
+  }
+}
