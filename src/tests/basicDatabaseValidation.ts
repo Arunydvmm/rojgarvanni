@@ -107,7 +107,7 @@ async function validateDatabase() {
 
     // Test CREATE
     try {
-      const createdJob = JobRepository.create(testJob);
+      const createdJob = await JobRepository.create(testJob);
       test('Job creation', createdJob.id === testJob.id);
     } catch (error) {
       test('Job creation', false, (error as Error).message);
@@ -115,10 +115,10 @@ async function validateDatabase() {
 
     // Test READ
     try {
-      const foundJob = JobRepository.findById(testJob.id);
+      const foundJob = await JobRepository.findById(testJob.id);
       test('Job retrieval by ID', foundJob !== null && foundJob.id === testJob.id);
       
-      const foundBySlug = JobRepository.findBySlug(testJob.slug);
+      const foundBySlug = await JobRepository.findBySlug(testJob.slug);
       test('Job retrieval by slug', foundBySlug !== null && foundBySlug.slug === testJob.slug);
     } catch (error) {
       test('Job retrieval', false, (error as Error).message);
@@ -126,7 +126,7 @@ async function validateDatabase() {
 
     // Test UPDATE
     try {
-      const updatedJob = JobRepository.update(testJob.id, { 
+      const updatedJob = await JobRepository.update(testJob.id, { 
         title: 'Updated Test Job Title',
         totalVacancies: 75 
       });
@@ -138,7 +138,7 @@ async function validateDatabase() {
 
     // Test COUNT
     try {
-      const count = JobRepository.count();
+      const count = await JobRepository.count();
       test('Job count', count >= 1, `Found ${count} jobs`);
     } catch (error) {
       test('Job count', false, (error as Error).message);
@@ -147,13 +147,13 @@ async function validateDatabase() {
     // 3. Settings Repository (Singleton)
     console.log('\n📁 Settings Management');
     try {
-      const settings = SettingsRepository.get();
+      const settings = await SettingsRepository.get();
       test('Settings retrieval', settings.siteTitle === 'RozgarVaani - India Government Jobs');
       
-      const updatedSettings = SettingsRepository.update({ adsEnabled: false });
+      const updatedSettings = await SettingsRepository.update({ adsEnabled: false });
       test('Settings update', updatedSettings.adsEnabled === false);
       
-      const verifyUpdate = SettingsRepository.get();
+      const verifyUpdate = await SettingsRepository.get();
       test('Settings persistence', verifyUpdate.adsEnabled === false);
     } catch (error) {
       test('Settings operations', false, (error as Error).message);
@@ -180,8 +180,8 @@ async function validateDatabase() {
         { postName: 'Junior Engineer', vacancies: 25, categoryBreakdown: { ur: 15, obc: 9, sc: 1, st: 0, ews: 0 } }
       ];
 
-      const created = JobRepository.create(complexJob);
-      const retrieved = JobRepository.findById(complexJob.id);
+      const created = await JobRepository.create(complexJob);
+      const retrieved = await JobRepository.findById(complexJob.id);
       
       test('Complex JSON persistence', 
         retrieved !== null && 

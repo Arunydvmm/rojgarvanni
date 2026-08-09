@@ -1,12 +1,12 @@
 /**
- * SQLite Database Schema for RozgarVaani Government Job Portal
+ * PostgreSQL Database Schema for RozgarVaani Government Job Portal
  * 
  * All tables, indexes, and constraints required for production-ready
- * database-first architecture using better-sqlite3.
+ * database-first architecture using pg driver.
  * 
  * DESIGN PRINCIPLES:
  * - Single source of truth for all job data
- * - JSONB-style TEXT columns for nested objects (SQLite doesn't have native JSONB)
+ * - JSONB type for nested objects (native PostgreSQL support)
  * - Unique constraints on organization + advertisement_number for duplicate protection
  * - Indexes on frequently queried columns (status, timestamps, slugs)
  * - Audit trail for all admin actions
@@ -27,39 +27,38 @@ CREATE TABLE IF NOT EXISTS jobs (
   advertisement_number TEXT,
   category TEXT NOT NULL,
   state TEXT,
-  post_names TEXT NOT NULL, -- JSON array
+  post_names JSONB NOT NULL,
   total_vacancies INTEGER NOT NULL DEFAULT 0,
-  category_wise_vacancies TEXT, -- JSON object
-  vacancy_details TEXT, -- JSON array of VacancyDetail
+  category_wise_vacancies JSONB,
+  vacancy_details JSONB,
   qualification TEXT NOT NULL,
   qualification_details TEXT NOT NULL,
   age_min INTEGER NOT NULL,
   age_max INTEGER NOT NULL,
   age_relaxation TEXT NOT NULL,
-  application_start TEXT NOT NULL, -- ISO 8601 date string
+  application_start TEXT NOT NULL,
   application_end TEXT NOT NULL,
   fee_payment_deadline TEXT NOT NULL,
   correction_window TEXT,
   exam_date TEXT NOT NULL,
   admit_card_date TEXT,
   result_date TEXT,
-  application_fee TEXT NOT NULL, -- JSON object (ApplicationFee)
-  salary TEXT NOT NULL, -- JSON object (SalaryInfo)
-  selection_process TEXT NOT NULL, -- JSON array
-  how_to_apply TEXT NOT NULL, -- JSON array
+  application_fee JSONB NOT NULL,
+  salary JSONB NOT NULL,
+  selection_process JSONB NOT NULL,
+  how_to_apply JSONB NOT NULL,
   overview TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('NEW', 'ACTIVE', 'CLOSING_SOON', 'TODAY', 'CLOSED')),
-  is_closing_soon INTEGER NOT NULL DEFAULT 0, -- boolean as 0/1
-  links TEXT NOT NULL, -- JSON object
-  source_info TEXT NOT NULL, -- JSON object
+  is_closing_soon BOOLEAN NOT NULL DEFAULT false,
+  links JSONB NOT NULL,
+  source_info JSONB NOT NULL,
   verification_status TEXT NOT NULL CHECK(verification_status IN ('PASSED', 'FAILED', 'PENDING')),
   quality_status TEXT NOT NULL CHECK(quality_status IN ('PASSED', 'FAILED', 'PENDING')),
-  is_draft INTEGER NOT NULL DEFAULT 0, -- boolean as 0/1
+  is_draft BOOLEAN NOT NULL DEFAULT false,
   published_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   
-  -- Duplicate prevention: each org can only post one job with the same advertisement number
   UNIQUE(organization, advertisement_number)
 );
 
@@ -86,10 +85,10 @@ CREATE TABLE IF NOT EXISTS drafts (
   advertisement_number TEXT,
   category TEXT NOT NULL,
   state TEXT,
-  post_names TEXT NOT NULL,
+  post_names JSONB NOT NULL,
   total_vacancies INTEGER NOT NULL DEFAULT 0,
-  category_wise_vacancies TEXT,
-  vacancy_details TEXT,
+  category_wise_vacancies JSONB,
+  vacancy_details JSONB,
   qualification TEXT NOT NULL,
   qualification_details TEXT NOT NULL,
   age_min INTEGER NOT NULL,
@@ -102,26 +101,25 @@ CREATE TABLE IF NOT EXISTS drafts (
   exam_date TEXT NOT NULL,
   admit_card_date TEXT,
   result_date TEXT,
-  application_fee TEXT NOT NULL,
-  salary TEXT NOT NULL,
-  selection_process TEXT NOT NULL,
-  how_to_apply TEXT NOT NULL,
+  application_fee JSONB NOT NULL,
+  salary JSONB NOT NULL,
+  selection_process JSONB NOT NULL,
+  how_to_apply JSONB NOT NULL,
   overview TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('NEW', 'ACTIVE', 'CLOSING_SOON', 'TODAY', 'CLOSED')),
-  is_closing_soon INTEGER NOT NULL DEFAULT 0,
-  links TEXT NOT NULL,
-  source_info TEXT NOT NULL,
+  is_closing_soon BOOLEAN NOT NULL DEFAULT false,
+  links JSONB NOT NULL,
+  source_info JSONB NOT NULL,
   verification_status TEXT NOT NULL CHECK(verification_status IN ('PASSED', 'FAILED', 'PENDING')),
   quality_status TEXT NOT NULL CHECK(quality_status IN ('PASSED', 'FAILED', 'PENDING')),
-  is_draft INTEGER NOT NULL DEFAULT 1,
+  is_draft BOOLEAN NOT NULL DEFAULT true,
   published_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   
-  -- Draft-specific fields
-  verification_report TEXT NOT NULL, -- JSON object (VerificationReport)
-  agent_logs TEXT NOT NULL, -- JSON array of AgentLog
-  qa_final_report TEXT, -- JSON object (QAFinalReport) - added after Final QA agent
+  verification_report JSONB NOT NULL,
+  agent_logs JSONB NOT NULL,
+  qa_final_report JSONB,
   
   UNIQUE(organization, advertisement_number)
 );
@@ -150,7 +148,7 @@ CREATE TABLE IF NOT EXISTS results (
   notification_url TEXT,
   cut_off_info TEXT,
   overview TEXT,
-  is_draft INTEGER NOT NULL DEFAULT 0,
+  is_draft BOOLEAN NOT NULL DEFAULT false,
   verification_status TEXT NOT NULL CHECK(verification_status IN ('PASSED', 'FAILED', 'PENDING')),
   published_at TEXT NOT NULL,
   created_at TEXT NOT NULL
@@ -177,9 +175,9 @@ CREATE TABLE IF NOT EXISTS admit_cards (
   status TEXT NOT NULL CHECK(status IN ('AVAILABLE', 'SOON')),
   download_url TEXT NOT NULL,
   official_website_url TEXT NOT NULL,
-  instructions TEXT, -- JSON array
+  instructions JSONB,
   overview TEXT,
-  is_draft INTEGER NOT NULL DEFAULT 0,
+  is_draft BOOLEAN NOT NULL DEFAULT false,
   verification_status TEXT NOT NULL CHECK(verification_status IN ('PASSED', 'FAILED', 'PENDING')),
   published_at TEXT NOT NULL,
   created_at TEXT NOT NULL
@@ -208,7 +206,7 @@ CREATE TABLE IF NOT EXISTS answer_keys (
   objection_link TEXT,
   official_website_url TEXT NOT NULL,
   overview TEXT,
-  is_draft INTEGER NOT NULL DEFAULT 0,
+  is_draft BOOLEAN NOT NULL DEFAULT false,
   verification_status TEXT NOT NULL CHECK(verification_status IN ('PASSED', 'FAILED', 'PENDING')),
   published_at TEXT NOT NULL,
   created_at TEXT NOT NULL
@@ -293,16 +291,16 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
 export const SITE_SETTINGS_TABLE = `
 CREATE TABLE IF NOT EXISTS site_settings (
   id INTEGER PRIMARY KEY CHECK(id = 1),
-  ads_enabled INTEGER NOT NULL DEFAULT 1,
+  ads_enabled BOOLEAN NOT NULL DEFAULT true,
   site_title TEXT NOT NULL DEFAULT 'RozgarVaani - India Government Jobs',
   contact_email TEXT NOT NULL DEFAULT 'contact@rozgarvaani.in',
-  maintenance_mode INTEGER NOT NULL DEFAULT 0,
+  maintenance_mode BOOLEAN NOT NULL DEFAULT false,
   auto_scan_interval_minutes INTEGER NOT NULL DEFAULT 30
 );
 
--- Insert default settings if not exists
-INSERT OR IGNORE INTO site_settings (id, ads_enabled, site_title, contact_email, maintenance_mode, auto_scan_interval_minutes)
-VALUES (1, 1, 'RozgarVaani - India Government Jobs', 'contact@rozgarvaani.in', 0, 30);
+INSERT INTO site_settings (id, ads_enabled, site_title, contact_email, maintenance_mode, auto_scan_interval_minutes)
+VALUES (1, true, 'RozgarVaani - India Government Jobs', 'contact@rozgarvaani.in', false, 30)
+ON CONFLICT (id) DO NOTHING;
 `;
 
 /**
@@ -319,7 +317,7 @@ CREATE TABLE IF NOT EXISTS ad_campaigns (
   sponsor_name TEXT NOT NULL,
   banner_url TEXT NOT NULL,
   target_url TEXT NOT NULL,
-  active INTEGER NOT NULL DEFAULT 1,
+  active BOOLEAN NOT NULL DEFAULT true,
   impressions_count INTEGER NOT NULL DEFAULT 0,
   clicks_count INTEGER NOT NULL DEFAULT 0
 );

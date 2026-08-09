@@ -9,24 +9,16 @@ export class AuditLogRepository {
   /**
    * Create a new audit log
    */
-  static create(log: AuditLog): AuditLog {
+  static async create(log: AuditLog): Promise<AuditLog> {
     const db = getDatabase();
-    const stmt = db.prepare(`
-      INSERT INTO audit_logs (
+    await db.query(
+      `INSERT INTO audit_logs (
         id, admin_user, action, details, ip_address, timestamp
       ) VALUES (
-        @id, @admin_user, @action, @details, @ip_address, @timestamp
-      )
-    `);
-
-    stmt.run({
-      id: log.id,
-      admin_user: log.adminUser,
-      action: log.action,
-      details: log.details,
-      ip_address: log.ipAddress,
-      timestamp: log.timestamp,
-    });
+        $1, $2, $3, $4, $5, $6
+      )`,
+      [log.id, log.adminUser, log.action, log.details, log.ipAddress, log.timestamp]
+    );
 
     return log;
   }
@@ -34,102 +26,104 @@ export class AuditLogRepository {
   /**
    * Find log by ID
    */
-  static findById(id: string): AuditLog | null {
+  static async findById(id: string): Promise<AuditLog | null> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM audit_logs WHERE id = ?');
-    const row = stmt.get(id) as any;
+    const result = await db.query('SELECT * FROM audit_logs WHERE id = $1', [id]);
+    const row = result.rows[0];
     return row ? this.mapRowToLog(row) : null;
   }
 
   /**
    * Get all logs with optional filters
    */
-  static findAll(filters?: {
+  static async findAll(filters?: {
     adminUser?: string;
     action?: string;
     limit?: number;
     offset?: number;
-  }): AuditLog[] {
+  }): Promise<AuditLog[]> {
     const db = getDatabase();
+    const params: any[] = [];
+    let paramIndex = 1;
     let query = 'SELECT * FROM audit_logs WHERE 1=1';
-    const params: any = {};
 
     if (filters?.adminUser) {
-      query += ' AND admin_user = @admin_user';
-      params.admin_user = filters.adminUser;
+      query += ` AND admin_user = $${paramIndex++}`;
+      params.push(filters.adminUser);
     }
 
     if (filters?.action) {
-      query += ' AND action = @action';
-      params.action = filters.action;
+      query += ` AND action = $${paramIndex++}`;
+      params.push(filters.action);
     }
 
     query += ' ORDER BY timestamp DESC';
 
     if (filters?.limit) {
-      query += ' LIMIT @limit';
-      params.limit = filters.limit;
+      query += ` LIMIT $${paramIndex++}`;
+      params.push(filters.limit);
     }
 
     if (filters?.offset) {
-      query += ' OFFSET @offset';
-      params.offset = filters.offset;
+      query += ` OFFSET $${paramIndex++}`;
+      params.push(filters.offset);
     }
 
-    const stmt = db.prepare(query);
-    const rows = stmt.all(params) as any[];
-    return rows.map((row) => this.mapRowToLog(row));
+    const result = await db.query(query, params);
+    return result.rows.map((row) => this.mapRowToLog(row));
   }
 
   /**
    * Get logs by date range
    */
-  static findByDateRange(
+  static async findByDateRange(
     startDate: string,
     endDate: string,
     limit = 1000
-  ): AuditLog[] {
+  ): Promise<AuditLog[]> {
     const db = getDatabase();
-    const stmt = db.prepare(
-      'SELECT * FROM audit_logs WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp DESC LIMIT ?'
+    const result = await db.query(
+      'SELECT * FROM audit_logs WHERE timestamp >= $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT $3',
+      [startDate, endDate, limit]
     );
-    const rows = stmt.all(startDate, endDate, limit) as any[];
-    return rows.map((row) => this.mapRowToLog(row));
+    return result.rows.map((row) => this.mapRowToLog(row));
   }
 
   /**
    * Count logs with optional filters
    */
-  static count(filters?: { adminUser?: string; action?: string }): number {
+  static async count(filters?: { adminUser?: string; action?: string }): Promise<number> {
     const db = getDatabase();
+    const params: any[] = [];
+    let paramIndex = 1;
     let query = 'SELECT COUNT(*) as count FROM audit_logs WHERE 1=1';
-    const params: any = {};
 
     if (filters?.adminUser) {
-      query += ' AND admin_user = @admin_user';
-      params.admin_user = filters.adminUser;
+      query += ` AND admin_user = $${paramIndex++}`;
+      params.push(filters.adminUser);
     }
 
     if (filters?.action) {
-      query += ' AND action = @action';
-      params.action = filters.action;
+      query += ` AND action = $${paramIndex++}`;
+      params.push(filters.action);
     }
 
-    const stmt = db.prepare(query);
-    const result = stmt.get(params) as { count: number };
-    return result.count;
+    const result = await db.query(query, params);
+    return parseInt(result.rows[0].count, 10);
   }
 
   /**
    * Get activity summary by admin user
    */
-  static getActivityByUser(): Array<{
-    adminUser: string;
-    actionCount: number;
-    lastAction: string;
-  }> {
+  static async getActivityByUser(): Promise<
+    Array<{
+      adminUser: string;
+      actionCount: number;
+      lastAction: string;
+    }>
+  > {
     const db = getDatabase();
-    const stmt = db.prepare(`
+    const result = await db.query(`
       SELECT 
         admin_user,
         COUNT(*) as action_count,
@@ -138,15 +132,10 @@ export class AuditLogRepository {
       GROUP BY admin_user
       ORDER BY action_count DESC
     `);
-    const rows = stmt.all() as Array<{
-      admin_user: string;
-      action_count: number;
-      last_action: string;
-    }>;
 
-    return rows.map((row) => ({
+    return result.rows.map((row) => ({
       adminUser: row.admin_user,
-      actionCount: row.action_count,
+      actionCount: parseInt(row.action_count, 10),
       lastAction: row.last_action,
     }));
   }
@@ -154,26 +143,27 @@ export class AuditLogRepository {
   /**
    * Get recent activity (last N logs)
    */
-  static getRecentActivity(limit = 50): AuditLog[] {
+  static async getRecentActivity(limit = 50): Promise<AuditLog[]> {
     const db = getDatabase();
-    const stmt = db.prepare(
-      'SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?'
+    const result = await db.query(
+      'SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT $1',
+      [limit]
     );
-    const rows = stmt.all(limit) as any[];
-    return rows.map((row) => this.mapRowToLog(row));
+    return result.rows.map((row) => this.mapRowToLog(row));
   }
 
   /**
    * Delete old logs (cleanup)
    */
-  static deleteOlderThan(daysOld: number): number {
+  static async deleteOlderThan(daysOld: number): Promise<number> {
     const db = getDatabase();
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOld);
 
-    const stmt = db.prepare('DELETE FROM audit_logs WHERE timestamp < ?');
-    const result = stmt.run(cutoffDate.toISOString());
-    return result.changes;
+    const result = await db.query('DELETE FROM audit_logs WHERE timestamp < $1', [
+      cutoffDate.toISOString(),
+    ]);
+    return result.rowCount || 0;
   }
 
   /**

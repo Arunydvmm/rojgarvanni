@@ -2,16 +2,16 @@
  * Database Connection Service for RozgarVaani
  * 
  * Provides:
- * - Singleton database connection
+ * - Singleton PostgreSQL pool connection
  * - Health check functionality
  * - Graceful shutdown handling
  * - Database availability flag for route guards
  */
 
-import Database from 'better-sqlite3';
+import { Pool, PoolClient } from 'pg';
 import { INIT_STATEMENTS, getSchemaVersion } from './schema.js';
 
-let db: Database.Database | null = null;
+let pool: Pool | null = null;
 let _isDatabaseAvailable = false;
 
 /**
@@ -22,61 +22,63 @@ export function isDatabaseAvailable(): boolean {
 }
 
 /**
- * Get database instance
+ * Get database pool instance
  * @throws Error if database is not initialized
  */
-export function getDatabase(): Database.Database {
-  if (!db) {
+export function getDatabase(): Pool {
+  if (!pool) {
     throw new Error('Database not initialized. Call initializeDatabase() first.');
   }
-  return db;
+  return pool;
 }
 
 /**
- * Initialize database connection and create tables
+ * Initialize database connection pool and create tables
  */
-export function initializeDatabase(databasePath?: string): {
+export async function initializeDatabase(databaseUrl?: string): Promise<{
   success: boolean;
   error?: string;
-} {
+}> {
   try {
-    const dbPath = databasePath || process.env.DATABASE_URL || './rozgarvaani.db';
+    const connectionString =
+      databaseUrl || process.env.DATABASE_URL || 'postgresql://localhost/rozgarvaani';
 
-    if (!dbPath) {
+    if (!connectionString) {
       throw new Error('DATABASE_URL environment variable is required');
     }
 
-    console.log(`[DB] Connecting to SQLite database at: ${dbPath}`);
+    console.log('[DB] Connecting to PostgreSQL database...');
 
-    // Create database connection
-    db = new Database(dbPath, {
-      verbose: process.env.NODE_ENV === 'development' ? console.log : undefined,
+    // Create connection pool
+    pool = new Pool({
+      connectionString,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
     });
 
-    // Enable foreign keys (SQLite has them disabled by default)
-    db.pragma('foreign_keys = ON');
-
-    // Enable WAL mode for better concurrency
-    db.pragma('journal_mode = WAL');
+    // Test connection
+    const client = await pool.connect();
+    console.log('[DB] ✓ PostgreSQL connection established');
+    client.release();
 
     // Run schema initialization
     console.log('[DB] Initializing schema...');
     for (const statement of INIT_STATEMENTS) {
-      db.exec(statement);
+      await pool.query(statement);
     }
 
     // Verify schema by counting tables
-    const tableCount = db
-      .prepare(
-        `SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`
-      )
-      .get() as { count: number };
+    const result = await pool.query(
+      `SELECT COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'public'`
+    );
+    const tableCount = parseInt(result.rows[0].count, 10);
 
-    console.log(`[DB] Schema initialized. Tables created: ${tableCount.count}`);
+    console.log(`[DB] Schema initialized. Tables created: ${tableCount}`);
 
-    if (tableCount.count < 10) {
+    if (tableCount < 10) {
       throw new Error(
-        `Schema initialization incomplete. Expected 10 tables, found ${tableCount.count}`
+        `Schema initialization incomplete. Expected 10 tables, found ${tableCount}`
       );
     }
 
@@ -96,14 +98,14 @@ export function initializeDatabase(databasePath?: string): {
 /**
  * Health check - verifies database is accessible and responsive
  */
-export function checkDatabaseHealth(): {
+export async function checkDatabaseHealth(): Promise<{
   available: boolean;
   responsive: boolean;
   error?: string;
   tableCount?: number;
   schemaVersion?: number;
-} {
-  if (!_isDatabaseAvailable || !db) {
+}> {
+  if (!_isDatabaseAvailable || !pool) {
     return {
       available: false,
       responsive: false,
@@ -113,14 +115,15 @@ export function checkDatabaseHealth(): {
 
   try {
     // Simple query to test responsiveness
-    const result = db
-      .prepare(`SELECT COUNT(*) as count FROM sqlite_master WHERE type='table'`)
-      .get() as { count: number };
+    const result = await pool.query(
+      `SELECT COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'public'`
+    );
+    const tableCount = parseInt(result.rows[0].count, 10);
 
     return {
       available: true,
       responsive: true,
-      tableCount: result.count,
+      tableCount,
       schemaVersion: getSchemaVersion(),
     };
   } catch (error) {
@@ -135,16 +138,16 @@ export function checkDatabaseHealth(): {
 }
 
 /**
- * Close database connection gracefully
+ * Close database connection pool gracefully
  */
-export function closeDatabase(): void {
-  if (db) {
+export async function closeDatabase(): Promise<void> {
+  if (pool) {
     try {
-      console.log('[DB] Closing database connection...');
-      db.close();
-      db = null;
+      console.log('[DB] Closing database pool...');
+      await pool.end();
+      pool = null;
       _isDatabaseAvailable = false;
-      console.log('[DB] ✓ Database connection closed');
+      console.log('[DB] ✓ Database pool closed');
     } catch (error) {
       console.error(
         '[DB] Error closing database:',
@@ -159,29 +162,29 @@ export function closeDatabase(): void {
  */
 export function setupShutdownHandlers(): void {
   // Handle process termination
-  process.on('SIGTERM', () => {
+  process.on('SIGTERM', async () => {
     console.log('[DB] SIGTERM received, closing database...');
-    closeDatabase();
+    await closeDatabase();
     process.exit(0);
   });
 
-  process.on('SIGINT', () => {
+  process.on('SIGINT', async () => {
     console.log('[DB] SIGINT received, closing database...');
-    closeDatabase();
+    await closeDatabase();
     process.exit(0);
   });
 
   // Handle uncaught exceptions
-  process.on('uncaughtException', (error) => {
+  process.on('uncaughtException', async (error) => {
     console.error('[DB] Uncaught exception:', error);
-    closeDatabase();
+    await closeDatabase();
     process.exit(1);
   });
 
   // Handle unhandled promise rejections
-  process.on('unhandledRejection', (reason, promise) => {
+  process.on('unhandledRejection', async (reason, promise) => {
     console.error('[DB] Unhandled rejection at:', promise, 'reason:', reason);
-    closeDatabase();
+    await closeDatabase();
     process.exit(1);
   });
 }
@@ -189,37 +192,51 @@ export function setupShutdownHandlers(): void {
 /**
  * Execute a transaction with automatic rollback on error
  */
-export function runTransaction<T>(fn: (db: Database.Database) => T): T {
+export async function runTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
   const database = getDatabase();
-  const transaction = database.transaction(fn);
-  return transaction(database);
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
  * Get database statistics
  */
-export function getDatabaseStats(): {
+export async function getDatabaseStats(): Promise<{
   available: boolean;
-  path?: string;
-  sizeBytes?: number;
-  pageCount?: number;
-  pageSize?: number;
-} {
-  if (!_isDatabaseAvailable || !db) {
+  dbSize?: string;
+  tableCount?: number;
+}> {
+  if (!_isDatabaseAvailable || !pool) {
     return { available: false };
   }
 
   try {
-    const pageCount = db.pragma('page_count', { simple: true }) as number;
-    const pageSize = db.pragma('page_size', { simple: true }) as number;
-    const sizeBytes = pageCount * pageSize;
+    const sizeResult = await pool.query(
+      `SELECT pg_size_pretty(pg_database_size(current_database())) as size`
+    );
+    const dbSize = sizeResult.rows[0].size;
+
+    const tableResult = await pool.query(
+      `SELECT COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'public'`
+    );
+    const tableCount = parseInt(tableResult.rows[0].count, 10);
 
     return {
       available: true,
-      path: db.name,
-      sizeBytes,
-      pageCount,
-      pageSize,
+      dbSize,
+      tableCount,
     };
   } catch (error) {
     return {

@@ -9,32 +9,31 @@ export class SourceRepository {
   /**
    * Create a new source
    */
-  static create(source: SourceRegistry): SourceRegistry {
+  static async create(source: SourceRegistry): Promise<SourceRegistry> {
     const db = getDatabase();
-    const stmt = db.prepare(`
-      INSERT INTO sources (
+    await db.query(
+      `INSERT INTO sources (
         id, name, type, url, status, crawl_frequency, last_scan,
         last_successful_scan, last_error, permission_notes, parser_type, jobs_extracted_count
       ) VALUES (
-        @id, @name, @type, @url, @status, @crawl_frequency, @last_scan,
-        @last_successful_scan, @last_error, @permission_notes, @parser_type, @jobs_extracted_count
-      )
-    `);
-
-    stmt.run({
-      id: source.id,
-      name: source.name,
-      type: source.type,
-      url: source.url,
-      status: source.status,
-      crawl_frequency: source.crawlFrequency,
-      last_scan: source.lastScan,
-      last_successful_scan: source.lastSuccessfulScan,
-      last_error: source.lastError || null,
-      permission_notes: source.permissionNotes,
-      parser_type: source.parserType,
-      jobs_extracted_count: source.jobsExtractedCount,
-    });
+        $1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12
+      )`,
+      [
+        source.id,
+        source.name,
+        source.type,
+        source.url,
+        source.status,
+        source.crawlFrequency,
+        source.lastScan,
+        source.lastSuccessfulScan,
+        source.lastError || null,
+        source.permissionNotes,
+        source.parserType,
+        source.jobsExtractedCount,
+      ]
+    );
 
     return source;
   }
@@ -42,113 +41,113 @@ export class SourceRepository {
   /**
    * Find source by ID
    */
-  static findById(id: string): SourceRegistry | null {
+  static async findById(id: string): Promise<SourceRegistry | null> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM sources WHERE id = ?');
-    const row = stmt.get(id) as any;
+    const result = await db.query('SELECT * FROM sources WHERE id = $1', [id]);
+    const row = result.rows[0];
     return row ? this.mapRowToSource(row) : null;
   }
 
   /**
    * Find source by name (unique)
    */
-  static findByName(name: string): SourceRegistry | null {
+  static async findByName(name: string): Promise<SourceRegistry | null> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM sources WHERE name = ?');
-    const row = stmt.get(name) as any;
+    const result = await db.query('SELECT * FROM sources WHERE name = $1', [name]);
+    const row = result.rows[0];
     return row ? this.mapRowToSource(row) : null;
   }
 
   /**
    * Get all sources with optional filters
    */
-  static findAll(filters?: {
+  static async findAll(filters?: {
     type?: string;
     status?: string;
     limit?: number;
     offset?: number;
-  }): SourceRegistry[] {
+  }): Promise<SourceRegistry[]> {
     const db = getDatabase();
+    const params: any[] = [];
+    let paramIndex = 1;
     let query = 'SELECT * FROM sources WHERE 1=1';
-    const params: any = {};
 
     if (filters?.type) {
-      query += ' AND type = @type';
-      params.type = filters.type;
+      query += ` AND type = $${paramIndex++}`;
+      params.push(filters.type);
     }
 
     if (filters?.status) {
-      query += ' AND status = @status';
-      params.status = filters.status;
+      query += ` AND status = $${paramIndex++}`;
+      params.push(filters.status);
     }
 
     query += ' ORDER BY name ASC';
 
     if (filters?.limit) {
-      query += ' LIMIT @limit';
-      params.limit = filters.limit;
+      query += ` LIMIT $${paramIndex++}`;
+      params.push(filters.limit);
     }
 
     if (filters?.offset) {
-      query += ' OFFSET @offset';
-      params.offset = filters.offset;
+      query += ` OFFSET $${paramIndex++}`;
+      params.push(filters.offset);
     }
 
-    const stmt = db.prepare(query);
-    const rows = stmt.all(params) as any[];
-    return rows.map((row) => this.mapRowToSource(row));
+    const result = await db.query(query, params);
+    return result.rows.map((row) => this.mapRowToSource(row));
   }
 
   /**
    * Get active sources ready for scanning
    */
-  static getActiveSources(): SourceRegistry[] {
+  static async getActiveSources(): Promise<SourceRegistry[]> {
     const db = getDatabase();
-    const stmt = db.prepare("SELECT * FROM sources WHERE status = 'ACTIVE' ORDER BY last_scan ASC");
-    const rows = stmt.all() as any[];
-    return rows.map((row) => this.mapRowToSource(row));
+    const result = await db.query(
+      "SELECT * FROM sources WHERE status = 'ACTIVE' ORDER BY last_scan ASC"
+    );
+    return result.rows.map((row) => this.mapRowToSource(row));
   }
 
   /**
    * Update source
    */
-  static update(id: string, updates: Partial<SourceRegistry>): SourceRegistry | null {
-    const existing = this.findById(id);
+  static async update(id: string, updates: Partial<SourceRegistry>): Promise<SourceRegistry | null> {
+    const existing = await this.findById(id);
     if (!existing) return null;
 
     const updated = { ...existing, ...updates };
 
     const db = getDatabase();
-    const stmt = db.prepare(`
-      UPDATE sources SET
-        name = @name,
-        type = @type,
-        url = @url,
-        status = @status,
-        crawl_frequency = @crawl_frequency,
-        last_scan = @last_scan,
-        last_successful_scan = @last_successful_scan,
-        last_error = @last_error,
-        permission_notes = @permission_notes,
-        parser_type = @parser_type,
-        jobs_extracted_count = @jobs_extracted_count
-      WHERE id = @id
-    `);
-
-    stmt.run({
-      id: updated.id,
-      name: updated.name,
-      type: updated.type,
-      url: updated.url,
-      status: updated.status,
-      crawl_frequency: updated.crawlFrequency,
-      last_scan: updated.lastScan,
-      last_successful_scan: updated.lastSuccessfulScan,
-      last_error: updated.lastError || null,
-      permission_notes: updated.permissionNotes,
-      parser_type: updated.parserType,
-      jobs_extracted_count: updated.jobsExtractedCount,
-    });
+    await db.query(
+      `UPDATE sources SET
+        name = $1,
+        type = $2,
+        url = $3,
+        status = $4,
+        crawl_frequency = $5,
+        last_scan = $6,
+        last_successful_scan = $7,
+        last_error = $8,
+        permission_notes = $9,
+        parser_type = $10,
+        jobs_extracted_count = $11
+      WHERE id = $12`,
+      [
+        updated.name,
+        updated.type,
+        updated.url,
+        updated.status,
+        updated.crawlFrequency,
+        updated.lastScan,
+        updated.lastSuccessfulScan,
+        updated.lastError || null,
+        updated.permissionNotes,
+        updated.parserType,
+        updated.jobsExtractedCount,
+        updated.id,
+      ]
+    );
 
     return updated;
   }
@@ -156,94 +155,97 @@ export class SourceRepository {
   /**
    * Update scan timestamp
    */
-  static updateScanTimestamp(id: string, success: boolean, error?: string): void {
+  static async updateScanTimestamp(id: string, success: boolean, error?: string): Promise<void> {
     const db = getDatabase();
     const now = new Date().toISOString();
 
     if (success) {
-      const stmt = db.prepare(`
-        UPDATE sources 
-        SET last_scan = ?, last_successful_scan = ?, last_error = NULL, status = 'ACTIVE'
-        WHERE id = ?
-      `);
-      stmt.run(now, now, id);
+      await db.query(
+        `UPDATE sources 
+        SET last_scan = $1, last_successful_scan = $2, last_error = NULL, status = 'ACTIVE'
+        WHERE id = $3`,
+        [now, now, id]
+      );
     } else {
-      const stmt = db.prepare(`
-        UPDATE sources 
-        SET last_scan = ?, last_error = ?, status = 'ERROR'
-        WHERE id = ?
-      `);
-      stmt.run(now, error || 'Unknown error', id);
+      await db.query(
+        `UPDATE sources 
+        SET last_scan = $1, last_error = $2, status = 'ERROR'
+        WHERE id = $3`,
+        [now, error || 'Unknown error', id]
+      );
     }
   }
 
   /**
    * Increment jobs extracted count
    */
-  static incrementJobsExtracted(id: string, count: number): void {
+  static async incrementJobsExtracted(id: string, count: number): Promise<void> {
     const db = getDatabase();
-    const stmt = db.prepare(
-      'UPDATE sources SET jobs_extracted_count = jobs_extracted_count + ? WHERE id = ?'
+    await db.query(
+      'UPDATE sources SET jobs_extracted_count = jobs_extracted_count + $1 WHERE id = $2',
+      [count, id]
     );
-    stmt.run(count, id);
   }
 
   /**
    * Delete source by ID
    */
-  static delete(id: string): boolean {
+  static async delete(id: string): Promise<boolean> {
     const db = getDatabase();
-    const stmt = db.prepare('DELETE FROM sources WHERE id = ?');
-    const result = stmt.run(id);
-    return result.changes > 0;
+    const result = await db.query('DELETE FROM sources WHERE id = $1', [id]);
+    return result.rowCount! > 0;
   }
 
   /**
    * Count sources
    */
-  static count(filters?: { status?: string }): number {
+  static async count(filters?: { status?: string }): Promise<number> {
     const db = getDatabase();
+    const params: any[] = [];
+    let paramIndex = 1;
     let query = 'SELECT COUNT(*) as count FROM sources WHERE 1=1';
-    const params: any = {};
 
     if (filters?.status) {
-      query += ' AND status = @status';
-      params.status = filters.status;
+      query += ` AND status = $${paramIndex++}`;
+      params.push(filters.status);
     }
 
-    const stmt = db.prepare(query);
-    const result = stmt.get(params) as { count: number };
-    return result.count;
+    const result = await db.query(query, params);
+    return parseInt(result.rows[0].count, 10);
   }
 
   /**
    * Get sources summary
    */
-  static getSummary(): {
+  static async getSummary(): Promise<{
     totalSources: number;
     activeSources: number;
     errorSources: number;
     totalJobsExtracted: number;
-  } {
+  }> {
     const db = getDatabase();
 
-    const totalStmt = db.prepare('SELECT COUNT(*) as count FROM sources');
-    const totalResult = totalStmt.get() as { count: number };
+    const totalResult = await db.query('SELECT COUNT(*) as count FROM sources');
+    const totalSources = parseInt(totalResult.rows[0].count, 10);
 
-    const activeStmt = db.prepare("SELECT COUNT(*) as count FROM sources WHERE status = 'ACTIVE'");
-    const activeResult = activeStmt.get() as { count: number };
+    const activeResult = await db.query(
+      "SELECT COUNT(*) as count FROM sources WHERE status = 'ACTIVE'"
+    );
+    const activeSources = parseInt(activeResult.rows[0].count, 10);
 
-    const errorStmt = db.prepare("SELECT COUNT(*) as count FROM sources WHERE status = 'ERROR'");
-    const errorResult = errorStmt.get() as { count: number };
+    const errorResult = await db.query(
+      "SELECT COUNT(*) as count FROM sources WHERE status = 'ERROR'"
+    );
+    const errorSources = parseInt(errorResult.rows[0].count, 10);
 
-    const jobsStmt = db.prepare('SELECT SUM(jobs_extracted_count) as total FROM sources');
-    const jobsResult = jobsStmt.get() as { total: number };
+    const jobsResult = await db.query('SELECT SUM(jobs_extracted_count) as total FROM sources');
+    const totalJobsExtracted = parseInt(jobsResult.rows[0].total || 0, 10);
 
     return {
-      totalSources: totalResult.count,
-      activeSources: activeResult.count,
-      errorSources: errorResult.count,
-      totalJobsExtracted: jobsResult.total || 0,
+      totalSources,
+      activeSources,
+      errorSources,
+      totalJobsExtracted,
     };
   }
 

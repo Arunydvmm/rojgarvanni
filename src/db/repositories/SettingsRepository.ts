@@ -9,13 +9,12 @@ export class SettingsRepository {
   /**
    * Get site settings (singleton - always ID 1)
    */
-  static get(): SiteSettings {
+  static async get(): Promise<SiteSettings> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM site_settings WHERE id = 1');
-    const row = stmt.get() as any;
+    const result = await db.query('SELECT * FROM site_settings WHERE id = 1');
+    const row = result.rows[0];
 
     if (!row) {
-      // Should never happen due to INSERT OR IGNORE in schema, but handle gracefully
       throw new Error('Site settings not initialized');
     }
 
@@ -25,28 +24,27 @@ export class SettingsRepository {
   /**
    * Update site settings
    */
-  static update(updates: Partial<SiteSettings>): SiteSettings {
-    const existing = this.get();
+  static async update(updates: Partial<SiteSettings>): Promise<SiteSettings> {
+    const existing = await this.get();
     const updated = { ...existing, ...updates };
 
     const db = getDatabase();
-    const stmt = db.prepare(`
-      UPDATE site_settings SET
-        ads_enabled = @ads_enabled,
-        site_title = @site_title,
-        contact_email = @contact_email,
-        maintenance_mode = @maintenance_mode,
-        auto_scan_interval_minutes = @auto_scan_interval_minutes
-      WHERE id = 1
-    `);
-
-    stmt.run({
-      ads_enabled: updated.adsEnabled ? 1 : 0,
-      site_title: updated.siteTitle,
-      contact_email: updated.contactEmail,
-      maintenance_mode: updated.maintenanceMode ? 1 : 0,
-      auto_scan_interval_minutes: updated.autoScanIntervalMinutes,
-    });
+    await db.query(
+      `UPDATE site_settings SET
+        ads_enabled = $1,
+        site_title = $2,
+        contact_email = $3,
+        maintenance_mode = $4,
+        auto_scan_interval_minutes = $5
+      WHERE id = 1`,
+      [
+        updated.adsEnabled,
+        updated.siteTitle,
+        updated.contactEmail,
+        updated.maintenanceMode,
+        updated.autoScanIntervalMinutes,
+      ]
+    );
 
     return updated;
   }
@@ -54,47 +52,43 @@ export class SettingsRepository {
   /**
    * Enable/disable ads
    */
-  static setAdsEnabled(enabled: boolean): void {
+  static async setAdsEnabled(enabled: boolean): Promise<void> {
     const db = getDatabase();
-    const stmt = db.prepare('UPDATE site_settings SET ads_enabled = ? WHERE id = 1');
-    stmt.run(enabled ? 1 : 0);
+    await db.query('UPDATE site_settings SET ads_enabled = $1 WHERE id = 1', [enabled]);
   }
 
   /**
    * Enable/disable maintenance mode
    */
-  static setMaintenanceMode(enabled: boolean): void {
+  static async setMaintenanceMode(enabled: boolean): Promise<void> {
     const db = getDatabase();
-    const stmt = db.prepare('UPDATE site_settings SET maintenance_mode = ? WHERE id = 1');
-    stmt.run(enabled ? 1 : 0);
+    await db.query('UPDATE site_settings SET maintenance_mode = $1 WHERE id = 1', [enabled]);
   }
 
   /**
    * Update auto-scan interval
    */
-  static setAutoScanInterval(minutes: number): void {
+  static async setAutoScanInterval(minutes: number): Promise<void> {
     const db = getDatabase();
-    const stmt = db.prepare(
-      'UPDATE site_settings SET auto_scan_interval_minutes = ? WHERE id = 1'
-    );
-    stmt.run(minutes);
+    await db.query('UPDATE site_settings SET auto_scan_interval_minutes = $1 WHERE id = 1', [
+      minutes,
+    ]);
   }
 
   /**
    * Reset to default settings
    */
-  static resetToDefaults(): SiteSettings {
+  static async resetToDefaults(): Promise<SiteSettings> {
     const db = getDatabase();
-    const stmt = db.prepare(`
-      UPDATE site_settings SET
-        ads_enabled = 1,
+    await db.query(
+      `UPDATE site_settings SET
+        ads_enabled = true,
         site_title = 'RozgarVaani - India Government Jobs',
         contact_email = 'contact@rozgarvaani.in',
-        maintenance_mode = 0,
+        maintenance_mode = false,
         auto_scan_interval_minutes = 30
-      WHERE id = 1
-    `);
-    stmt.run();
+      WHERE id = 1`
+    );
 
     return this.get();
   }
@@ -104,10 +98,10 @@ export class SettingsRepository {
    */
   private static mapRowToSettings(row: any): SiteSettings {
     return {
-      adsEnabled: row.ads_enabled === 1,
+      adsEnabled: row.ads_enabled,
       siteTitle: row.site_title,
       contactEmail: row.contact_email,
-      maintenanceMode: row.maintenance_mode === 1,
+      maintenanceMode: row.maintenance_mode,
       autoScanIntervalMinutes: row.auto_scan_interval_minutes,
     };
   }

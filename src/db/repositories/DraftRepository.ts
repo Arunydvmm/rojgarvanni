@@ -9,10 +9,10 @@ export class DraftRepository {
   /**
    * Create a new draft
    */
-  static create(draft: GovtJobDraft): GovtJobDraft {
+  static async create(draft: GovtJobDraft): Promise<GovtJobDraft> {
     const db = getDatabase();
-    const stmt = db.prepare(`
-      INSERT INTO drafts (
+    await db.query(
+      `INSERT INTO drafts (
         id, slug, title, organization, department, advertisement_number,
         category, state, post_names, total_vacancies, category_wise_vacancies,
         vacancy_details, qualification, qualification_details, age_min, age_max,
@@ -22,65 +22,60 @@ export class DraftRepository {
         links, source_info, verification_status, quality_status, is_draft,
         published_at, created_at, updated_at, verification_report, agent_logs, qa_final_report
       ) VALUES (
-        @id, @slug, @title, @organization, @department, @advertisement_number,
-        @category, @state, @post_names, @total_vacancies, @category_wise_vacancies,
-        @vacancy_details, @qualification, @qualification_details, @age_min, @age_max,
-        @age_relaxation, @application_start, @application_end, @fee_payment_deadline,
-        @correction_window, @exam_date, @admit_card_date, @result_date, @application_fee,
-        @salary, @selection_process, @how_to_apply, @overview, @status, @is_closing_soon,
-        @links, @source_info, @verification_status, @quality_status, @is_draft,
-        @published_at, @created_at, @updated_at, @verification_report, @agent_logs, @qa_final_report
-      )
-    `);
-
-    stmt.run({
-      id: draft.id,
-      slug: draft.slug,
-      title: draft.title,
-      organization: draft.organization,
-      department: draft.department,
-      advertisement_number: draft.advertisementNumber || null,
-      category: draft.category,
-      state: draft.state || null,
-      post_names: JSON.stringify(draft.postNames),
-      total_vacancies: draft.totalVacancies,
-      category_wise_vacancies: draft.categoryWiseVacancies
-        ? JSON.stringify(draft.categoryWiseVacancies)
-        : null,
-      vacancy_details: draft.vacancyDetails
-        ? JSON.stringify(draft.vacancyDetails)
-        : null,
-      qualification: draft.qualification,
-      qualification_details: draft.qualificationDetails,
-      age_min: draft.ageMin,
-      age_max: draft.ageMax,
-      age_relaxation: draft.ageRelaxation,
-      application_start: draft.applicationStart,
-      application_end: draft.applicationEnd,
-      fee_payment_deadline: draft.feePaymentDeadline,
-      correction_window: draft.correctionWindow || null,
-      exam_date: draft.examDate,
-      admit_card_date: draft.admitCardDate || null,
-      result_date: draft.resultDate || null,
-      application_fee: JSON.stringify(draft.applicationFee),
-      salary: JSON.stringify(draft.salary),
-      selection_process: JSON.stringify(draft.selectionProcess),
-      how_to_apply: JSON.stringify(draft.howToApply),
-      overview: draft.overview,
-      status: draft.status,
-      is_closing_soon: draft.isClosingSoon ? 1 : 0,
-      links: JSON.stringify(draft.links),
-      source_info: JSON.stringify(draft.sourceInfo),
-      verification_status: draft.verificationStatus,
-      quality_status: draft.qualityStatus,
-      is_draft: 1, // Always 1 for drafts
-      published_at: draft.publishedAt || null,
-      created_at: draft.createdAt,
-      updated_at: draft.updatedAt,
-      verification_report: JSON.stringify(draft.verificationReport),
-      agent_logs: JSON.stringify(draft.agentLogs),
-      qa_final_report: null, // Will be added by Final QA agent
-    });
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21,
+        $22, $23, $24, $25, $26,
+        $27, $28, $29, $30, $31,
+        $32, $33, $34, $35, $36,
+        $37, $38, $39, $40, $41, $42
+      )`,
+      [
+        draft.id,
+        draft.slug,
+        draft.title,
+        draft.organization,
+        draft.department,
+        draft.advertisementNumber || null,
+        draft.category,
+        draft.state || null,
+        JSON.stringify(draft.postNames),
+        draft.totalVacancies,
+        draft.categoryWiseVacancies ? JSON.stringify(draft.categoryWiseVacancies) : null,
+        draft.vacancyDetails ? JSON.stringify(draft.vacancyDetails) : null,
+        draft.qualification,
+        draft.qualificationDetails,
+        draft.ageMin,
+        draft.ageMax,
+        draft.ageRelaxation,
+        draft.applicationStart,
+        draft.applicationEnd,
+        draft.feePaymentDeadline,
+        draft.correctionWindow || null,
+        draft.examDate,
+        draft.admitCardDate || null,
+        draft.resultDate || null,
+        JSON.stringify(draft.applicationFee),
+        JSON.stringify(draft.salary),
+        JSON.stringify(draft.selectionProcess),
+        JSON.stringify(draft.howToApply),
+        draft.overview,
+        draft.status,
+        draft.isClosingSoon,
+        JSON.stringify(draft.links),
+        JSON.stringify(draft.sourceInfo),
+        draft.verificationStatus,
+        draft.qualityStatus,
+        true,
+        draft.publishedAt || null,
+        draft.createdAt,
+        draft.updatedAt,
+        JSON.stringify(draft.verificationReport),
+        JSON.stringify(draft.agentLogs),
+        null,
+      ]
+    );
 
     return draft;
   }
@@ -88,157 +83,152 @@ export class DraftRepository {
   /**
    * Find draft by ID
    */
-  static findById(id: string): GovtJobDraft | null {
+  static async findById(id: string): Promise<GovtJobDraft | null> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM drafts WHERE id = ?');
-    const row = stmt.get(id) as any;
+    const result = await db.query('SELECT * FROM drafts WHERE id = $1', [id]);
+    const row = result.rows[0];
     return row ? this.mapRowToDraft(row) : null;
   }
 
   /**
    * Find draft by slug
    */
-  static findBySlug(slug: string): GovtJobDraft | null {
+  static async findBySlug(slug: string): Promise<GovtJobDraft | null> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM drafts WHERE slug = ?');
-    const row = stmt.get(slug) as any;
+    const result = await db.query('SELECT * FROM drafts WHERE slug = $1', [slug]);
+    const row = result.rows[0];
     return row ? this.mapRowToDraft(row) : null;
   }
 
   /**
    * Get all drafts with optional filters
    */
-  static findAll(filters?: {
+  static async findAll(filters?: {
     verificationStatus?: string;
     limit?: number;
     offset?: number;
-  }): GovtJobDraft[] {
+  }): Promise<GovtJobDraft[]> {
     const db = getDatabase();
+    const params: any[] = [];
+    let paramIndex = 1;
     let query = 'SELECT * FROM drafts WHERE 1=1';
-    const params: any = {};
 
     if (filters?.verificationStatus) {
-      query += ' AND verification_status = @verification_status';
-      params.verification_status = filters.verificationStatus;
+      query += ` AND verification_status = $${paramIndex++}`;
+      params.push(filters.verificationStatus);
     }
 
     query += ' ORDER BY created_at DESC';
 
     if (filters?.limit) {
-      query += ' LIMIT @limit';
-      params.limit = filters.limit;
+      query += ` LIMIT $${paramIndex++}`;
+      params.push(filters.limit);
     }
 
     if (filters?.offset) {
-      query += ' OFFSET @offset';
-      params.offset = filters.offset;
+      query += ` OFFSET $${paramIndex++}`;
+      params.push(filters.offset);
     }
 
-    const stmt = db.prepare(query);
-    const rows = stmt.all(params) as any[];
-    return rows.map((row) => this.mapRowToDraft(row));
+    const result = await db.query(query, params);
+    return result.rows.map((row) => this.mapRowToDraft(row));
   }
 
   /**
    * Update draft
    */
-  static update(id: string, updates: Partial<GovtJobDraft>): GovtJobDraft | null {
-    const existing = this.findById(id);
+  static async update(id: string, updates: Partial<GovtJobDraft>): Promise<GovtJobDraft | null> {
+    const existing = await this.findById(id);
     if (!existing) return null;
 
     const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
 
     const db = getDatabase();
-    const stmt = db.prepare(`
-      UPDATE drafts SET
-        slug = @slug,
-        title = @title,
-        organization = @organization,
-        department = @department,
-        advertisement_number = @advertisement_number,
-        category = @category,
-        state = @state,
-        post_names = @post_names,
-        total_vacancies = @total_vacancies,
-        category_wise_vacancies = @category_wise_vacancies,
-        vacancy_details = @vacancy_details,
-        qualification = @qualification,
-        qualification_details = @qualification_details,
-        age_min = @age_min,
-        age_max = @age_max,
-        age_relaxation = @age_relaxation,
-        application_start = @application_start,
-        application_end = @application_end,
-        fee_payment_deadline = @fee_payment_deadline,
-        correction_window = @correction_window,
-        exam_date = @exam_date,
-        admit_card_date = @admit_card_date,
-        result_date = @result_date,
-        application_fee = @application_fee,
-        salary = @salary,
-        selection_process = @selection_process,
-        how_to_apply = @how_to_apply,
-        overview = @overview,
-        status = @status,
-        is_closing_soon = @is_closing_soon,
-        links = @links,
-        source_info = @source_info,
-        verification_status = @verification_status,
-        quality_status = @quality_status,
-        published_at = @published_at,
-        updated_at = @updated_at,
-        verification_report = @verification_report,
-        agent_logs = @agent_logs,
-        qa_final_report = @qa_final_report
-      WHERE id = @id
-    `);
-
-    stmt.run({
-      id: updated.id,
-      slug: updated.slug,
-      title: updated.title,
-      organization: updated.organization,
-      department: updated.department,
-      advertisement_number: updated.advertisementNumber || null,
-      category: updated.category,
-      state: updated.state || null,
-      post_names: JSON.stringify(updated.postNames),
-      total_vacancies: updated.totalVacancies,
-      category_wise_vacancies: updated.categoryWiseVacancies
-        ? JSON.stringify(updated.categoryWiseVacancies)
-        : null,
-      vacancy_details: updated.vacancyDetails
-        ? JSON.stringify(updated.vacancyDetails)
-        : null,
-      qualification: updated.qualification,
-      qualification_details: updated.qualificationDetails,
-      age_min: updated.ageMin,
-      age_max: updated.ageMax,
-      age_relaxation: updated.ageRelaxation,
-      application_start: updated.applicationStart,
-      application_end: updated.applicationEnd,
-      fee_payment_deadline: updated.feePaymentDeadline,
-      correction_window: updated.correctionWindow || null,
-      exam_date: updated.examDate,
-      admit_card_date: updated.admitCardDate || null,
-      result_date: updated.resultDate || null,
-      application_fee: JSON.stringify(updated.applicationFee),
-      salary: JSON.stringify(updated.salary),
-      selection_process: JSON.stringify(updated.selectionProcess),
-      how_to_apply: JSON.stringify(updated.howToApply),
-      overview: updated.overview,
-      status: updated.status,
-      is_closing_soon: updated.isClosingSoon ? 1 : 0,
-      links: JSON.stringify(updated.links),
-      source_info: JSON.stringify(updated.sourceInfo),
-      verification_status: updated.verificationStatus,
-      quality_status: updated.qualityStatus,
-      published_at: updated.publishedAt || null,
-      updated_at: updated.updatedAt,
-      verification_report: JSON.stringify(updated.verificationReport),
-      agent_logs: JSON.stringify(updated.agentLogs),
-      qa_final_report: null, // Keep existing or set from updates if provided
-    });
+    await db.query(
+      `UPDATE drafts SET
+        slug = $1,
+        title = $2,
+        organization = $3,
+        department = $4,
+        advertisement_number = $5,
+        category = $6,
+        state = $7,
+        post_names = $8,
+        total_vacancies = $9,
+        category_wise_vacancies = $10,
+        vacancy_details = $11,
+        qualification = $12,
+        qualification_details = $13,
+        age_min = $14,
+        age_max = $15,
+        age_relaxation = $16,
+        application_start = $17,
+        application_end = $18,
+        fee_payment_deadline = $19,
+        correction_window = $20,
+        exam_date = $21,
+        admit_card_date = $22,
+        result_date = $23,
+        application_fee = $24,
+        salary = $25,
+        selection_process = $26,
+        how_to_apply = $27,
+        overview = $28,
+        status = $29,
+        is_closing_soon = $30,
+        links = $31,
+        source_info = $32,
+        verification_status = $33,
+        quality_status = $34,
+        published_at = $35,
+        updated_at = $36,
+        verification_report = $37,
+        agent_logs = $38,
+        qa_final_report = $39
+      WHERE id = $40`,
+      [
+        updated.slug,
+        updated.title,
+        updated.organization,
+        updated.department,
+        updated.advertisementNumber || null,
+        updated.category,
+        updated.state || null,
+        JSON.stringify(updated.postNames),
+        updated.totalVacancies,
+        updated.categoryWiseVacancies ? JSON.stringify(updated.categoryWiseVacancies) : null,
+        updated.vacancyDetails ? JSON.stringify(updated.vacancyDetails) : null,
+        updated.qualification,
+        updated.qualificationDetails,
+        updated.ageMin,
+        updated.ageMax,
+        updated.ageRelaxation,
+        updated.applicationStart,
+        updated.applicationEnd,
+        updated.feePaymentDeadline,
+        updated.correctionWindow || null,
+        updated.examDate,
+        updated.admitCardDate || null,
+        updated.resultDate || null,
+        JSON.stringify(updated.applicationFee),
+        JSON.stringify(updated.salary),
+        JSON.stringify(updated.selectionProcess),
+        JSON.stringify(updated.howToApply),
+        updated.overview,
+        updated.status,
+        updated.isClosingSoon,
+        JSON.stringify(updated.links),
+        JSON.stringify(updated.sourceInfo),
+        updated.verificationStatus,
+        updated.qualityStatus,
+        updated.publishedAt || null,
+        updated.updatedAt,
+        JSON.stringify(updated.verificationReport),
+        JSON.stringify(updated.agentLogs),
+        null,
+        updated.id,
+      ]
+    );
 
     return updated;
   }
@@ -246,36 +236,34 @@ export class DraftRepository {
   /**
    * Delete draft by ID
    */
-  static delete(id: string): boolean {
+  static async delete(id: string): Promise<boolean> {
     const db = getDatabase();
-    const stmt = db.prepare('DELETE FROM drafts WHERE id = ?');
-    const result = stmt.run(id);
-    return result.changes > 0;
+    const result = await db.query('DELETE FROM drafts WHERE id = $1', [id]);
+    return result.rowCount! > 0;
   }
 
   /**
    * Count drafts
    */
-  static count(): number {
+  static async count(): Promise<number> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM drafts');
-    const result = stmt.get() as { count: number };
-    return result.count;
+    const result = await db.query('SELECT COUNT(*) as count FROM drafts');
+    return parseInt(result.rows[0].count, 10);
   }
 
   /**
    * Check if draft exists by organization and advertisement number
    */
-  static existsByOrgAndAdvNumber(
+  static async existsByOrgAndAdvNumber(
     organization: string,
     advertisementNumber: string
-  ): boolean {
+  ): Promise<boolean> {
     const db = getDatabase();
-    const stmt = db.prepare(
-      'SELECT COUNT(*) as count FROM drafts WHERE organization = ? AND advertisement_number = ?'
+    const result = await db.query(
+      'SELECT COUNT(*) as count FROM drafts WHERE organization = $1 AND advertisement_number = $2',
+      [organization, advertisementNumber]
     );
-    const result = stmt.get(organization, advertisementNumber) as { count: number };
-    return result.count > 0;
+    return parseInt(result.rows[0].count, 10) > 0;
   }
 
   /**
@@ -291,14 +279,10 @@ export class DraftRepository {
       advertisementNumber: row.advertisement_number,
       category: row.category,
       state: row.state,
-      postNames: JSON.parse(row.post_names),
+      postNames: row.post_names,
       totalVacancies: row.total_vacancies,
-      categoryWiseVacancies: row.category_wise_vacancies
-        ? JSON.parse(row.category_wise_vacancies)
-        : undefined,
-      vacancyDetails: row.vacancy_details
-        ? JSON.parse(row.vacancy_details)
-        : undefined,
+      categoryWiseVacancies: row.category_wise_vacancies,
+      vacancyDetails: row.vacancy_details,
       qualification: row.qualification,
       qualificationDetails: row.qualification_details,
       ageMin: row.age_min,
@@ -311,23 +295,23 @@ export class DraftRepository {
       examDate: row.exam_date,
       admitCardDate: row.admit_card_date,
       resultDate: row.result_date,
-      applicationFee: JSON.parse(row.application_fee),
-      salary: JSON.parse(row.salary),
-      selectionProcess: JSON.parse(row.selection_process),
-      howToApply: JSON.parse(row.how_to_apply),
+      applicationFee: row.application_fee,
+      salary: row.salary,
+      selectionProcess: row.selection_process,
+      howToApply: row.how_to_apply,
       overview: row.overview,
       status: row.status,
-      isClosingSoon: row.is_closing_soon === 1,
-      links: JSON.parse(row.links),
-      sourceInfo: JSON.parse(row.source_info),
+      isClosingSoon: row.is_closing_soon,
+      links: row.links,
+      sourceInfo: row.source_info,
       verificationStatus: row.verification_status,
       qualityStatus: row.quality_status,
       isDraft: true,
       publishedAt: row.published_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      verificationReport: JSON.parse(row.verification_report),
-      agentLogs: JSON.parse(row.agent_logs),
+      verificationReport: row.verification_report,
+      agentLogs: row.agent_logs,
     };
   }
 }

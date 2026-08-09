@@ -11,36 +11,36 @@ export class ExamResultRepository {
   /**
    * Create a new exam result record
    */
-  static create(result: ExamResult): void {
+  static async create(result: ExamResult): Promise<void> {
     const db = getDatabase();
-    const stmt = db.prepare(`
-      INSERT INTO results (
-        id, slug, title, organization, category, exam_name, 
-        result_date, status, download_url, official_website_url, 
-        notification_url, cut_off_info, overview, is_draft, 
-        verification_status, published_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
 
     try {
-      stmt.run(
-        result.id,
-        result.slug,
-        result.title,
-        result.organization,
-        result.category,
-        result.examName,
-        result.resultDate,
-        result.status,
-        result.downloadUrl,
-        result.officialWebsiteUrl,
-        result.notificationUrl || null,
-        result.cutOffInfo || null,
-        result.overview,
-        result.isDraft ? 1 : 0,
-        result.verificationStatus,
-        result.publishedAt,
-        result.createdAt
+      await db.query(
+        `INSERT INTO results (
+          id, slug, title, organization, category, exam_name, 
+          result_date, status, download_url, official_website_url, 
+          notification_url, cut_off_info, overview, is_draft, 
+          verification_status, published_at, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+        [
+          result.id,
+          result.slug,
+          result.title,
+          result.organization,
+          result.category,
+          result.examName,
+          result.resultDate,
+          result.status,
+          result.downloadUrl,
+          result.officialWebsiteUrl,
+          result.notificationUrl || null,
+          result.cutOffInfo || null,
+          result.overview,
+          result.isDraft,
+          result.verificationStatus,
+          result.publishedAt,
+          result.createdAt,
+        ]
       );
     } catch (error) {
       console.error('[ExamResultRepository] Create failed:', error);
@@ -51,116 +51,113 @@ export class ExamResultRepository {
   /**
    * Find exam result by ID
    */
-  static findById(id: string): ExamResult | null {
+  static async findById(id: string): Promise<ExamResult | null> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM results WHERE id = ?');
-    const row = stmt.get(id) as any;
-    
-    if (!row) return null;
-    
-    return ExamResultRepository.mapRow(row);
+    const result = await db.query('SELECT * FROM results WHERE id = $1', [id]);
+
+    if (!result.rows[0]) return null;
+
+    return ExamResultRepository.mapRow(result.rows[0]);
   }
 
   /**
    * Find exam result by slug
    */
-  static findBySlug(slug: string): ExamResult | null {
+  static async findBySlug(slug: string): Promise<ExamResult | null> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM results WHERE slug = ?');
-    const row = stmt.get(slug) as any;
-    
-    if (!row) return null;
-    
-    return ExamResultRepository.mapRow(row);
+    const result = await db.query('SELECT * FROM results WHERE slug = $1', [slug]);
+
+    if (!result.rows[0]) return null;
+
+    return ExamResultRepository.mapRow(result.rows[0]);
   }
 
   /**
    * Find all exam results with optional filtering
    */
-  static findAll(options: {
+  static async findAll(options: {
     isDraft?: boolean;
     status?: string;
     category?: string;
     limit?: number;
     offset?: number;
-  } = {}): ExamResult[] {
+  } = {}): Promise<ExamResult[]> {
     const db = getDatabase();
-    
-    let query = 'SELECT * FROM results WHERE 1=1';
+
     const params: any[] = [];
+    let paramIndex = 1;
+    let query = 'SELECT * FROM results WHERE 1=1';
 
     if (options.isDraft !== undefined) {
-      query += ' AND is_draft = ?';
-      params.push(options.isDraft ? 1 : 0);
+      query += ` AND is_draft = $${paramIndex++}`;
+      params.push(options.isDraft);
     }
 
     if (options.status) {
-      query += ' AND status = ?';
+      query += ` AND status = $${paramIndex++}`;
       params.push(options.status);
     }
 
     if (options.category) {
-      query += ' AND category = ?';
+      query += ` AND category = $${paramIndex++}`;
       params.push(options.category);
     }
 
     query += ' ORDER BY created_at DESC';
 
     if (options.limit) {
-      query += ' LIMIT ?';
+      query += ` LIMIT $${paramIndex++}`;
       params.push(options.limit);
       if (options.offset) {
-        query += ' OFFSET ?';
+        query += ` OFFSET $${paramIndex++}`;
         params.push(options.offset);
       }
     }
 
-    const stmt = db.prepare(query);
-    const rows = stmt.all(...params) as any[];
-    
-    return rows.map(row => ExamResultRepository.mapRow(row));
+    const result = await db.query(query, params);
+
+    return result.rows.map((row) => ExamResultRepository.mapRow(row));
   }
 
   /**
    * Update exam result
    */
-  static update(id: string, updates: Partial<ExamResult>): ExamResult {
+  static async update(id: string, updates: Partial<ExamResult>): Promise<ExamResult> {
     const db = getDatabase();
-    const existing = ExamResultRepository.findById(id);
-    
+    const existing = await ExamResultRepository.findById(id);
+
     if (!existing) {
       throw new Error(`Exam result ${id} not found`);
     }
 
     const updated: ExamResult = { ...existing, ...updates };
 
-    const stmt = db.prepare(`
-      UPDATE results SET
-        slug = ?, title = ?, organization = ?, category = ?, exam_name = ?,
-        result_date = ?, status = ?, download_url = ?, official_website_url = ?,
-        notification_url = ?, cut_off_info = ?, overview = ?,
-        is_draft = ?, verification_status = ?, published_at = ?
-      WHERE id = ?
-    `);
-
     try {
-      stmt.run(
-        updated.slug,
-        updated.title,
-        updated.organization,
-        updated.category,
-        updated.examName,
-        updated.resultDate,
-        updated.status,
-        updated.downloadUrl,
-        updated.officialWebsiteUrl,
-        updated.notificationUrl || null,
-        updated.cutOffInfo || null,
-        updated.overview,
-        updated.isDraft ? 1 : 0,
-        updated.verificationStatus,
-        updated.publishedAt,
-        id
+      await db.query(
+        `UPDATE results SET
+          slug = $1, title = $2, organization = $3, category = $4, exam_name = $5,
+          result_date = $6, status = $7, download_url = $8, official_website_url = $9,
+          notification_url = $10, cut_off_info = $11, overview = $12,
+          is_draft = $13, verification_status = $14, published_at = $15
+        WHERE id = $16`,
+        [
+          updated.slug,
+          updated.title,
+          updated.organization,
+          updated.category,
+          updated.examName,
+          updated.resultDate,
+          updated.status,
+          updated.downloadUrl,
+          updated.officialWebsiteUrl,
+          updated.notificationUrl || null,
+          updated.cutOffInfo || null,
+          updated.overview,
+          updated.isDraft,
+          updated.verificationStatus,
+          updated.publishedAt,
+          id,
+        ]
       );
     } catch (error) {
       console.error('[ExamResultRepository] Update failed:', error);
@@ -173,12 +170,11 @@ export class ExamResultRepository {
   /**
    * Delete exam result
    */
-  static delete(id: string): void {
+  static async delete(id: string): Promise<void> {
     const db = getDatabase();
-    const stmt = db.prepare('DELETE FROM results WHERE id = ?');
-    
+
     try {
-      stmt.run(id);
+      await db.query('DELETE FROM results WHERE id = $1', [id]);
     } catch (error) {
       console.error('[ExamResultRepository] Delete failed:', error);
       throw error;
@@ -188,26 +184,26 @@ export class ExamResultRepository {
   /**
    * Count exam results
    */
-  static count(filters: { isDraft?: boolean; status?: string } = {}): number {
+  static async count(filters: { isDraft?: boolean; status?: string } = {}): Promise<number> {
     const db = getDatabase();
-    
-    let query = 'SELECT COUNT(*) as count FROM results WHERE 1=1';
+
     const params: any[] = [];
+    let paramIndex = 1;
+    let query = 'SELECT COUNT(*) as count FROM results WHERE 1=1';
 
     if (filters.isDraft !== undefined) {
-      query += ' AND is_draft = ?';
-      params.push(filters.isDraft ? 1 : 0);
+      query += ` AND is_draft = $${paramIndex++}`;
+      params.push(filters.isDraft);
     }
 
     if (filters.status) {
-      query += ' AND status = ?';
+      query += ` AND status = $${paramIndex++}`;
       params.push(filters.status);
     }
 
-    const stmt = db.prepare(query);
-    const result = stmt.get(...params) as any;
-    
-    return result?.count ?? 0;
+    const result = await db.query(query, params);
+
+    return parseInt(result.rows[0]?.count ?? 0, 10);
   }
 
   /**
@@ -228,7 +224,7 @@ export class ExamResultRepository {
       notificationUrl: row.notification_url,
       cutOffInfo: row.cut_off_info,
       overview: row.overview,
-      isDraft: row.is_draft === 1,
+      isDraft: row.is_draft,
       verificationStatus: row.verification_status,
       publishedAt: row.published_at,
       createdAt: row.created_at,

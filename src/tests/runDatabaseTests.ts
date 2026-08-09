@@ -288,20 +288,20 @@ async function runDatabaseTests() {
         const testJob = createTestJob();
         
         // CREATE
-        const created = JobRepository.create(testJob);
+        const created = await JobRepository.create(testJob);
         runner.expect(created.id).toBe(testJob.id);
 
         // READ
-        const found = JobRepository.findById(testJob.id);
+        const found = await JobRepository.findById(testJob.id);
         runner.expect(found).toBeDefined();
         runner.expect(found!.title).toBe(testJob.title);
 
         // UPDATE
-        const updated = JobRepository.update(testJob.id, { title: 'Updated Job' });
+        const updated = await JobRepository.update(testJob.id, { title: 'Updated Job' });
         runner.expect(updated!.title).toBe('Updated Job');
 
         // DELETE
-        const deleted = JobRepository.delete(testJob.id);
+        const deleted = await JobRepository.delete(testJob.id);
         runner.expect(deleted).toBe(true);
         runner.expect(JobRepository.findById(testJob.id)).toBeNull();
       });
@@ -309,20 +309,20 @@ async function runDatabaseTests() {
       runner.test('DraftRepository - CRUD with verification report', () => {
         const testDraft = createTestDraft();
         
-        const created = DraftRepository.create(testDraft);
+        const created = await DraftRepository.create(testDraft);
         runner.expect(created.verificationReport.verificationStatus).toBe('PASSED');
 
-        const found = DraftRepository.findById(testDraft.id);
+        const found = await DraftRepository.findById(testDraft.id);
         runner.expect(found!.verificationReport.qualityScore).toBe(85);
 
         runner.expect(DraftRepository.delete(testDraft.id)).toBe(true);
       });
 
       runner.test('SettingsRepository - Singleton operations', () => {
-        const settings = SettingsRepository.get();
+        const settings = await SettingsRepository.get();
         runner.expect(settings.adsEnabled).toBe(true);
 
-        const updated = SettingsRepository.update({ adsEnabled: false });
+        const updated = await SettingsRepository.update({ adsEnabled: false });
         runner.expect(updated.adsEnabled).toBe(false);
       });
     });
@@ -336,7 +336,7 @@ async function runDatabaseTests() {
         testJob.categoryWiseVacancies = { ur: 40, obc: 30, sc: 20, st: 10, ews: 0 };
         
         JobRepository.create(testJob);
-        const retrieved = JobRepository.findById(testJob.id);
+        const retrieved = await JobRepository.findById(testJob.id);
         
         runner.expect(retrieved!.categoryWiseVacancies).toEqual({
           ur: 40, obc: 30, sc: 20, st: 10, ews: 0
@@ -348,7 +348,7 @@ async function runDatabaseTests() {
         testJob.state = undefined;
         
         JobRepository.create(testJob);
-        const retrieved = JobRepository.findById(testJob.id);
+        const retrieved = await JobRepository.findById(testJob.id);
         runner.expect(retrieved!.state).toBe(undefined);
       });
     });
@@ -423,7 +423,7 @@ async function runDatabaseTests() {
       runner.test('should allow operations when DB available', () => {
         runner.expect(isDatabaseAvailable()).toBe(true);
         const testJob = createTestJob();
-        const created = JobRepository.create(testJob);
+        const created = await JobRepository.create(testJob);
         runner.expect(created).toBeDefined();
       });
 
@@ -458,7 +458,7 @@ async function runDatabaseTests() {
           }
         ];
 
-        const created = DraftRepository.create(testDraft);
+        const created = await DraftRepository.create(testDraft);
         runner.expect(created.agentLogs).toHaveLength(1);
       });
 
@@ -466,7 +466,7 @@ async function runDatabaseTests() {
         const job = createTestJob();
         JobRepository.create(job);
         
-        const exists = JobRepository.existsByOrgAndAdvNumber(
+        const exists = await JobRepository.existsByOrgAndAdvNumber(
           job.organization, 
           job.advertisementNumber!
         );

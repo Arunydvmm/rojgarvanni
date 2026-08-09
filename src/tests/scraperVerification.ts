@@ -148,7 +148,7 @@ async function verifyScraperSystem() {
     passCount++;
 
     // Try to retrieve it
-    const retrieved = DraftRepository.findById(testDraft.id);
+    const retrieved = await DraftRepository.findById(testDraft.id);
     if (retrieved && retrieved.title === testDraft.title) {
       log('success', '✓ Draft retrieved from database successfully');
       passCount++;
@@ -174,7 +174,7 @@ async function verifyScraperSystem() {
     passCount++;
 
     // Try to retrieve it
-    const found = SourceRepository.findByName('SarkariResult.com');
+    const found = await SourceRepository.findByName('SarkariResult.com');
     if (found) {
       log('success', '✓ Source retrieved by name');
       passCount++;
@@ -250,7 +250,7 @@ async function verifyScraperSystem() {
     log('success', '✓ Audit log created');
     passCount++;
 
-    const retrieved = AuditLogRepository.findAll({ limit: 1 });
+    const retrieved = await AuditLogRepository.findAll({ limit: 1 });
     if (retrieved && retrieved.length > 0) {
       log('success', '✓ Audit log retrieved');
       log('info', `  - Latest action: ${retrieved[0].action}`);

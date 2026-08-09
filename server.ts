@@ -75,7 +75,7 @@ function getGeminiClient(): GoogleGenAI | null {
 }
 
 // Helper to log audit actions
-function logAudit(action: string, details: string, adminUser = 'Administrator') {
+async function logAudit(action: string, details: string, adminUser = 'Administrator') {
   if (!isDatabaseAvailable()) {
     console.warn('[Audit] Database unavailable, audit log not persisted:', action);
     return;
@@ -90,7 +90,7 @@ function logAudit(action: string, details: string, adminUser = 'Administrator') 
       ipAddress: '127.0.0.1',
       timestamp: new Date().toISOString(),
     };
-    AuditLogRepository.create(newLog);
+    await AuditLogRepository.create(newLog);
   } catch (error) {
     console.error('[Audit] Failed to create audit log:', error);
   }
@@ -112,14 +112,14 @@ function requireDatabase(req: express.Request, res: express.Response, next: expr
 // --- PUBLIC API ROUTES ---
 
 // GET /api/jobs
-app.get('/api/jobs', (req, res) => {
+app.get('/api/jobs', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
     const { category, qualification, status, search, limit } = req.query;
-    let filtered = JobRepository.findAll({ isDraft: false });
+    let filtered = await JobRepository.findAll({ isDraft: false });
 
   if (category && typeof category === 'string' && category !== 'All') {
     filtered = filtered.filter((j) => j.category.toLowerCase() === category.toLowerCase());
@@ -154,13 +154,13 @@ app.get('/api/jobs', (req, res) => {
 });
 
 // GET /api/jobs/:slug
-app.get('/api/jobs/:slug', (req, res) => {
+app.get('/api/jobs/:slug', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const job = JobRepository.findBySlug(req.params.slug) || JobRepository.findById(req.params.slug);
+    const job = await JobRepository.findBySlug(req.params.slug) || JobRepository.findById(req.params.slug);
     if (!job) {
       return res.status(404).json({ success: false, message: 'Government Job notification not found' });
     }
@@ -172,14 +172,14 @@ app.get('/api/jobs/:slug', (req, res) => {
 });
 
 // GET /api/results
-app.get('/api/results', (req, res) => {
+app.get('/api/results', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
     const { category, search } = req.query;
-    let filtered = ExamResultRepository.findAll({ isDraft: false });
+    let filtered = await ExamResultRepository.findAll({ isDraft: false });
 
     if (category && typeof category === 'string' && category !== 'All') {
       filtered = filtered.filter((r) => r.category.toLowerCase() === category.toLowerCase());
@@ -202,13 +202,13 @@ app.get('/api/results', (req, res) => {
 });
 
 // GET /api/results/:slug
-app.get('/api/results/:slug', (req, res) => {
+app.get('/api/results/:slug', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const item = ExamResultRepository.findBySlug(req.params.slug) || ExamResultRepository.findById(req.params.slug);
+    const item = await ExamResultRepository.findBySlug(req.params.slug) || ExamResultRepository.findById(req.params.slug);
     if (!item) {
       return res.status(404).json({ success: false, message: 'Result not found' });
     }
@@ -220,14 +220,14 @@ app.get('/api/results/:slug', (req, res) => {
 });
 
 // GET /api/admit-cards
-app.get('/api/admit-cards', (req, res) => {
+app.get('/api/admit-cards', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
     const { category, search } = req.query;
-    let filtered = AdmitCardRepository.findAll({ isDraft: false });
+    let filtered = await AdmitCardRepository.findAll({ isDraft: false });
 
     if (category && typeof category === 'string' && category !== 'All') {
       filtered = filtered.filter((a) => a.category.toLowerCase() === category.toLowerCase());
@@ -250,13 +250,13 @@ app.get('/api/admit-cards', (req, res) => {
 });
 
 // GET /api/admit-cards/:slug
-app.get('/api/admit-cards/:slug', (req, res) => {
+app.get('/api/admit-cards/:slug', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const item = AdmitCardRepository.findBySlug(req.params.slug) || AdmitCardRepository.findById(req.params.slug);
+    const item = await AdmitCardRepository.findBySlug(req.params.slug) || AdmitCardRepository.findById(req.params.slug);
     if (!item) {
       return res.status(404).json({ success: false, message: 'Admit Card not found' });
     }
@@ -268,14 +268,14 @@ app.get('/api/admit-cards/:slug', (req, res) => {
 });
 
 // GET /api/answer-keys
-app.get('/api/answer-keys', (req, res) => {
+app.get('/api/answer-keys', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
     const { category, search } = req.query;
-    let filtered = AnswerKeyRepository.findAll({ isDraft: false });
+    let filtered = await AnswerKeyRepository.findAll({ isDraft: false });
 
     if (category && typeof category === 'string' && category !== 'All') {
       filtered = filtered.filter((ak) => ak.category.toLowerCase() === category.toLowerCase());
@@ -298,13 +298,13 @@ app.get('/api/answer-keys', (req, res) => {
 });
 
 // GET /api/answer-keys/:slug
-app.get('/api/answer-keys/:slug', (req, res) => {
+app.get('/api/answer-keys/:slug', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const item = AnswerKeyRepository.findBySlug(req.params.slug) || AnswerKeyRepository.findById(req.params.slug);
+    const item = await AnswerKeyRepository.findBySlug(req.params.slug) || AnswerKeyRepository.findById(req.params.slug);
     if (!item) {
       return res.status(404).json({ success: false, message: 'Answer Key not found' });
     }
@@ -316,7 +316,7 @@ app.get('/api/answer-keys/:slug', (req, res) => {
 });
 
 // GET /api/search (Unified search across jobs, results, admit cards, answer keys)
-app.get('/api/search', (req, res) => {
+app.get('/api/search', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
@@ -330,7 +330,7 @@ app.get('/api/search', (req, res) => {
       });
     }
 
-    const matchedJobs = JobRepository.findAll({ isDraft: false }).filter(
+    const matchedJobs = (await JobRepository.findAll({ isDraft: false })).filter(
       (j) =>
         j.title.toLowerCase().includes(query) ||
         j.organization.toLowerCase().includes(query) ||
@@ -339,21 +339,21 @@ app.get('/api/search', (req, res) => {
     );
 
     // Include results, admit cards, and answer keys in search
-    const matchedResults = ExamResultRepository.findAll({ isDraft: false }).filter(
+    const matchedResults = (await ExamResultRepository.findAll({ isDraft: false })).filter(
       (r) =>
         r.title.toLowerCase().includes(query) ||
         r.organization.toLowerCase().includes(query) ||
         r.examName.toLowerCase().includes(query)
     );
 
-    const matchedAdmitCards = AdmitCardRepository.findAll({ isDraft: false }).filter(
+    const matchedAdmitCards = (await AdmitCardRepository.findAll({ isDraft: false })).filter(
       (a) =>
         a.title.toLowerCase().includes(query) ||
         a.organization.toLowerCase().includes(query) ||
         a.examName.toLowerCase().includes(query)
     );
 
-    const matchedAnswerKeys = AnswerKeyRepository.findAll({ isDraft: false }).filter(
+    const matchedAnswerKeys = (await AnswerKeyRepository.findAll({ isDraft: false })).filter(
       (ak) =>
         ak.title.toLowerCase().includes(query) ||
         ak.organization.toLowerCase().includes(query) ||
@@ -376,7 +376,7 @@ app.get('/api/search', (req, res) => {
 });
 
 // GET /api/site-settings (Public settings, e.g. whether ads are enabled)
-app.get('/api/site-settings', (req, res) => {
+app.get('/api/site-settings', async (req, res) => {
   if (!isDatabaseAvailable()) {
     // Return basic settings if database is unavailable
     return res.json({
@@ -393,7 +393,7 @@ app.get('/api/site-settings', (req, res) => {
   }
 
   try {
-    const settings = SettingsRepository.get();
+    const settings = await SettingsRepository.get();
     res.json({ success: true, data: settings, ads: settings.adsEnabled ? [] : [] }); // TODO: Add ad campaigns
   } catch (error) {
     console.error('[API] Error fetching site settings:', error);
@@ -404,7 +404,7 @@ app.get('/api/site-settings', (req, res) => {
 // --- ADMIN API ROUTES ---
 
 // POST /api/admin/login
-app.post('/api/admin/login', requireDatabase, (req, res) => {
+app.post('/api/admin/login', requireDatabase, async (req, res) => {
   const { password } = req.body;
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
   if (password === adminPassword) {
@@ -420,22 +420,22 @@ app.post('/api/admin/login', requireDatabase, (req, res) => {
 });
 
 // GET /api/admin/dashboard-stats
-app.get('/api/admin/dashboard-stats', (req, res) => {
+app.get('/api/admin/dashboard-stats', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const totalJobs = JobRepository.count();
-    const activeJobs = JobRepository.count({ status: 'ACTIVE' }) + JobRepository.count({ status: 'NEW' });
-    const totalDrafts = DraftRepository.count();
-    const failedDrafts = DraftRepository.findAll({ verificationStatus: 'FAILED' }).length;
-    const activeSources = SourceRepository.count({ status: 'ACTIVE' });
-    const totalAgentRuns = AgentLogRepository.count();
-    const totalResults = ExamResultRepository.count({ isDraft: false });
-    const totalAdmitCards = AdmitCardRepository.count({ isDraft: false });
-    const totalAnswerKeys = AnswerKeyRepository.count({ isDraft: false });
-    const settings = SettingsRepository.get();
+    const totalJobs = await JobRepository.count();
+    const activeJobs = await JobRepository.count({ status: 'ACTIVE' }) + await JobRepository.count({ status: 'NEW' });
+    const totalDrafts = await DraftRepository.count();
+    const failedDrafts = (await DraftRepository.findAll({ verificationStatus: 'FAILED' })).length;
+    const activeSources = await SourceRepository.count({ status: 'ACTIVE' });
+    const totalAgentRuns = await AgentLogRepository.count();
+    const totalResults = await ExamResultRepository.count({ isDraft: false });
+    const totalAdmitCards = await AdmitCardRepository.count({ isDraft: false });
+    const totalAnswerKeys = await AnswerKeyRepository.count({ isDraft: false });
+    const settings = await SettingsRepository.get();
 
     res.json({
       success: true,
@@ -459,13 +459,13 @@ app.get('/api/admin/dashboard-stats', (req, res) => {
 });
 
 // GET /api/admin/drafts
-app.get('/api/admin/drafts', (req, res) => {
+app.get('/api/admin/drafts', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const drafts = DraftRepository.findAll();
+    const drafts = await DraftRepository.findAll();
     res.json({ success: true, data: drafts });
   } catch (error) {
     console.error('[API] Error fetching drafts:', error);
@@ -474,9 +474,9 @@ app.get('/api/admin/drafts', (req, res) => {
 });
 
 // POST /api/admin/drafts/:id/approve
-app.post('/api/admin/drafts/:id/approve', requireDatabase, (req, res) => {
+app.post('/api/admin/drafts/:id/approve', requireDatabase, async (req, res) => {
   try {
-    const draft = DraftRepository.findById(req.params.id);
+    const draft = await DraftRepository.findById(req.params.id);
     if (!draft) {
       return res.status(404).json({ success: false, message: 'Draft not found' });
     }
@@ -510,9 +510,9 @@ app.post('/api/admin/drafts/:id/approve', requireDatabase, (req, res) => {
 });
 
 // POST /api/admin/drafts/:id/reject
-app.post('/api/admin/drafts/:id/reject', requireDatabase, (req, res) => {
+app.post('/api/admin/drafts/:id/reject', requireDatabase, async (req, res) => {
   try {
-    const draft = DraftRepository.findById(req.params.id);
+    const draft = await DraftRepository.findById(req.params.id);
     if (!draft) {
       return res.status(404).json({ success: false, message: 'Draft not found' });
     }
@@ -527,7 +527,7 @@ app.post('/api/admin/drafts/:id/reject', requireDatabase, (req, res) => {
 });
 
 // POST /api/admin/jobs/manual (Create or edit job manually)
-app.post('/api/admin/jobs/manual', requireDatabase, (req, res) => {
+app.post('/api/admin/jobs/manual', requireDatabase, async (req, res) => {
   const jobData = req.body;
   if (!jobData.title || !jobData.organization) {
     return res.status(400).json({ success: false, message: 'Title and Organization are required' });
@@ -581,7 +581,7 @@ app.post('/api/admin/jobs/manual', requireDatabase, (req, res) => {
       updatedAt: new Date().toISOString(),
     };
 
-    const existing = JobRepository.findById(newJob.id);
+    const existing = await JobRepository.findById(newJob.id);
     if (existing) {
       JobRepository.update(newJob.id, newJob);
       logAudit('UPDATE_JOB_MANUAL', `Updated job: ${newJob.title}`);
@@ -598,13 +598,13 @@ app.post('/api/admin/jobs/manual', requireDatabase, (req, res) => {
 });
 
 // GET /api/admin/sources
-app.get('/api/admin/sources', (req, res) => {
+app.get('/api/admin/sources', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const sources = SourceRepository.findAll();
+    const sources = await SourceRepository.findAll();
     res.json({ success: true, data: sources });
   } catch (error) {
     console.error('[API] Error fetching sources:', error);
@@ -613,7 +613,7 @@ app.get('/api/admin/sources', (req, res) => {
 });
 
 // POST /api/admin/sources
-app.post('/api/admin/sources', requireDatabase, (req, res) => {
+app.post('/api/admin/sources', requireDatabase, async (req, res) => {
   const { name, url, type, crawlFrequency, permissionNotes } = req.body;
   if (!name || !url) {
     return res.status(400).json({ success: false, message: 'Source Name and URL are required' });
@@ -644,13 +644,13 @@ app.post('/api/admin/sources', requireDatabase, (req, res) => {
 });
 
 // GET /api/admin/pipeline/logs
-app.get('/api/admin/pipeline/logs', (req, res) => {
+app.get('/api/admin/pipeline/logs', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const logs = AgentLogRepository.findAll({ limit: 1000 });
+    const logs = await AgentLogRepository.findAll({ limit: 1000 });
     res.json({ success: true, data: logs });
   } catch (error) {
     console.error('[API] Error fetching agent logs:', error);
@@ -659,13 +659,13 @@ app.get('/api/admin/pipeline/logs', (req, res) => {
 });
 
 // GET /api/admin/settings
-app.get('/api/admin/settings', (req, res) => {
+app.get('/api/admin/settings', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const settings = SettingsRepository.get();
+    const settings = await SettingsRepository.get();
     res.json({ success: true, data: settings });
   } catch (error) {
     console.error('[API] Error fetching settings:', error);
@@ -674,11 +674,11 @@ app.get('/api/admin/settings', (req, res) => {
 });
 
 // POST /api/admin/settings
-app.post('/api/admin/settings', requireDatabase, (req, res) => {
+app.post('/api/admin/settings', requireDatabase, async (req, res) => {
   const { adsEnabled, siteTitle, contactEmail, maintenanceMode, autoScanIntervalMinutes } = req.body;
   
   try {
-    const updatedSettings = SettingsRepository.update({
+    const updatedSettings = await SettingsRepository.update({
       adsEnabled: adsEnabled !== undefined ? Boolean(adsEnabled) : undefined,
       siteTitle: siteTitle || undefined,
       contactEmail: contactEmail || undefined,
@@ -695,13 +695,13 @@ app.post('/api/admin/settings', requireDatabase, (req, res) => {
 });
 
 // GET /api/admin/audit-logs
-app.get('/api/admin/audit-logs', (req, res) => {
+app.get('/api/admin/audit-logs', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const logs = AuditLogRepository.findAll({ limit: 1000 });
+    const logs = await AuditLogRepository.findAll({ limit: 1000 });
     res.json({ success: true, data: logs });
   } catch (error) {
     console.error('[API] Error fetching audit logs:', error);
@@ -711,8 +711,8 @@ app.get('/api/admin/audit-logs', (req, res) => {
 
 // ─── HEALTH CHECK ENDPOINT ──────────────────────────────────────────────────
 // GET /api/health
-app.get('/api/health', (req, res) => {
-  const dbHealth = checkDatabaseHealth();
+app.get('/api/health', async (req, res) => {
+  const dbHealth = await checkDatabaseHealth();
   const aiAvailable = Boolean(process.env.NVIDIA_API_KEY);
   
   const systemStatus = {
@@ -844,8 +844,8 @@ app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
     }
 
     // ── Stage 5: DUPLICATE CHECK ─────────────────────────────────────────────
-    const existingJobs = JobRepository.findAll({ limit: 20 });
-    const existingDrafts = DraftRepository.findAll({ limit: 20 });
+    const existingJobs = await JobRepository.findAll({ limit: 20 });
+    const existingDrafts = await DraftRepository.findAll({ limit: 20 });
     const existingTitles = [...existingJobs, ...existingDrafts].map((j) => ({
       id: j.id, title: j.title, organization: j.organization,
       advertisementNumber: j.advertisementNumber,
@@ -1143,7 +1143,7 @@ async function startServer() {
   
   // ── DATABASE INITIALIZATION ─────────────────────────────────────────────
   console.log('[Startup] Initializing database...');
-  const dbResult = initializeDatabase();
+  const dbResult = await initializeDatabase();
   
   if (!dbResult.success) {
     console.error(`[Startup] ✗ Database initialization failed: ${dbResult.error}`);
@@ -1164,10 +1164,10 @@ async function startServer() {
         console.log('[Startup] Starting web scraper scheduler...');
         scraperScheduler.start();
         console.log('[Startup] ✓ Web scraper scheduler running (every 15 minutes)');
-        logAudit('SCRAPER_START', 'Web scraper scheduler started on server startup');
+        await logAudit('SCRAPER_START', 'Web scraper scheduler started on server startup');
       } catch (error) {
         console.error('[Startup] ✗ Failed to start web scraper:', error);
-        logAudit('SCRAPER_START_FAILED', `Failed to start web scraper: ${error}`);
+        await logAudit('SCRAPER_START_FAILED', `Failed to start web scraper: ${error}`);
       }
     } else {
       console.log('[Startup] ⚠️  Web scraper scheduler is disabled (set SCRAPER_ENABLED=true to enable)');
@@ -1175,7 +1175,7 @@ async function startServer() {
   }
 
   // ── HEALTH CHECK ────────────────────────────────────────────────────────
-  const health = checkDatabaseHealth();
+  const health = await checkDatabaseHealth();
   console.log(`[Startup] Database health: ${health.available ? '✓ Available' : '✗ Unavailable'}`);
   if (health.available && health.tableCount) {
     console.log(`[Startup] Database tables: ${health.tableCount}`);
@@ -1191,7 +1191,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', async (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
@@ -1206,9 +1206,9 @@ async function startServer() {
 // POST /api/admin/drafts/:id/qa-check
 // Runs the complete 28-rule QA audit on a draft, auto-fixes safe issues,
 // and returns a strict QAFinalReport JSON.
-app.post('/api/admin/drafts/:id/qa-check', requireDatabase, (req, res) => {
+app.post('/api/admin/drafts/:id/qa-check', requireDatabase, async (req, res) => {
   try {
-    let draft = DraftRepository.findById(req.params.id);
+    let draft = await DraftRepository.findById(req.params.id);
     if (!draft) {
       return res.status(404).json({ success: false, message: 'Draft not found' });
     }
@@ -1498,8 +1498,8 @@ app.post('/api/admin/drafts/:id/qa-check', requireDatabase, (req, res) => {
     const advNo = (draft.advertisementNumber ?? '').trim().toLowerCase();
     const org = (draft.organization ?? '').trim().toLowerCase();
     if (advNo) {
-      const allJobs = JobRepository.findAll();
-      const allDrafts = DraftRepository.findAll();
+      const allJobs = await JobRepository.findAll();
+      const allDrafts = await DraftRepository.findAll();
       const exactDup = [...allJobs, ...allDrafts].find(
         (j) =>
           j.id !== draft.id &&
@@ -1724,13 +1724,13 @@ app.get('/api/admin/nvidia/test', async (_req, res) => {
 });
 
 // GET /api/admin/logs (alias for pipeline/logs used by AdminAuditLogs)
-app.get('/api/admin/logs', (req, res) => {
+app.get('/api/admin/logs', async (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
   try {
-    const logs = AgentLogRepository.findAll({ limit: 1000 });
+    const logs = await AgentLogRepository.findAll({ limit: 1000 });
     res.json({ success: true, data: logs });
   } catch (error) {
     console.error('[API] Error fetching logs:', error);
@@ -1741,7 +1741,7 @@ app.get('/api/admin/logs', (req, res) => {
 // ─── WEB SCRAPER ADMIN ENDPOINTS ─────────────────────────────────────────────
 
 // GET /api/admin/scraper/status — Get current scraper status and stats
-app.get('/api/admin/scraper/status', requireDatabase, (req, res) => {
+app.get('/api/admin/scraper/status', requireDatabase, async (req, res) => {
   try {
     const stats = scraperScheduler.getStats();
     const info = scraperScheduler.getInfo();
@@ -1778,7 +1778,7 @@ app.post('/api/admin/scraper/run', requireDatabase, async (req, res) => {
 });
 
 // POST /api/admin/scraper/start — Start the scheduler
-app.post('/api/admin/scraper/start', requireDatabase, (req, res) => {
+app.post('/api/admin/scraper/start', requireDatabase, async (req, res) => {
   try {
     scraperScheduler.start();
     logAudit('SCRAPER_SCHEDULER_START', 'Admin started scraper scheduler');
@@ -1791,7 +1791,7 @@ app.post('/api/admin/scraper/start', requireDatabase, (req, res) => {
 });
 
 // POST /api/admin/scraper/stop — Stop the scheduler
-app.post('/api/admin/scraper/stop', requireDatabase, (req, res) => {
+app.post('/api/admin/scraper/stop', requireDatabase, async (req, res) => {
   try {
     scraperScheduler.stop();
     logAudit('SCRAPER_SCHEDULER_STOP', 'Admin stopped scraper scheduler');
@@ -1804,7 +1804,7 @@ app.post('/api/admin/scraper/stop', requireDatabase, (req, res) => {
 });
 
 // POST /api/admin/scraper/reset-stats — Reset scraper statistics
-app.post('/api/admin/scraper/reset-stats', requireDatabase, (req, res) => {
+app.post('/api/admin/scraper/reset-stats', requireDatabase, async (req, res) => {
   try {
     scraperScheduler.resetStats();
     logAudit('SCRAPER_STATS_RESET', 'Admin reset scraper statistics');
@@ -1836,9 +1836,9 @@ app.get('/api/admin/scraper/test', requireDatabase, async (req, res) => {
 });
 
 // GET /api/admin/scraper/drafts — Get all draft jobs created by scraper
-app.get('/api/admin/scraper/drafts', requireDatabase, (req, res) => {
+app.get('/api/admin/scraper/drafts', requireDatabase, async (req, res) => {
   try {
-    const drafts = DraftRepository.findAll({ limit: 20, offset: 0 });
+    const drafts = await DraftRepository.findAll({ limit: 20, offset: 0 });
     
     // Filter to show only recently created scraper drafts (from last hour)
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -1863,4 +1863,5 @@ app.get('/api/admin/scraper/drafts', requireDatabase, (req, res) => {
 });
 
 startServer();
+
 

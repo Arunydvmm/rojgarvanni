@@ -226,23 +226,23 @@ describe('Database Integration Tests', () => {
       const testJob = createTestJob();
       
       // CREATE
-      const created = JobRepository.create(testJob);
+      const created = await JobRepository.create(testJob);
       expect(created.id).toBe(testJob.id);
       expect(created.title).toBe(testJob.title);
 
       // READ by ID
-      const foundById = JobRepository.findById(testJob.id);
+      const foundById = await JobRepository.findById(testJob.id);
       expect(foundById).toBeDefined();
       expect(foundById!.id).toBe(testJob.id);
       expect(foundById!.organization).toBe(testJob.organization);
 
       // READ by slug
-      const foundBySlug = JobRepository.findBySlug(testJob.slug);
+      const foundBySlug = await JobRepository.findBySlug(testJob.slug);
       expect(foundBySlug).toBeDefined();
       expect(foundBySlug!.slug).toBe(testJob.slug);
 
       // UPDATE
-      const updated = JobRepository.update(testJob.id, { 
+      const updated = await JobRepository.update(testJob.id, { 
         title: 'Updated Test Job',
         totalVacancies: 200
       });
@@ -252,10 +252,10 @@ describe('Database Integration Tests', () => {
       expect(updated!.organization).toBe(testJob.organization); // Unchanged field preserved
 
       // DELETE
-      const deleted = JobRepository.delete(testJob.id);
+      const deleted = await JobRepository.delete(testJob.id);
       expect(deleted).toBe(true);
       
-      const notFound = JobRepository.findById(testJob.id);
+      const notFound = await JobRepository.findById(testJob.id);
       expect(notFound).toBeNull();
     });
 
@@ -263,19 +263,19 @@ describe('Database Integration Tests', () => {
       const testDraft = createTestDraft();
       
       // CREATE
-      const created = DraftRepository.create(testDraft);
+      const created = await DraftRepository.create(testDraft);
       expect(created.id).toBe(testDraft.id);
       expect(created.isDraft).toBe(true);
       expect(created.verificationReport.verificationStatus).toBe('PASSED');
 
       // READ
-      const found = DraftRepository.findById(testDraft.id);
+      const found = await DraftRepository.findById(testDraft.id);
       expect(found).toBeDefined();
       expect(found!.verificationReport).toBeDefined();
       expect(found!.agentLogs).toEqual([]);
 
       // UPDATE
-      const updated = DraftRepository.update(testDraft.id, {
+      const updated = await DraftRepository.update(testDraft.id, {
         verificationReport: {
           ...testDraft.verificationReport,
           qualityScore: 95
@@ -284,11 +284,11 @@ describe('Database Integration Tests', () => {
       expect(updated!.verificationReport.qualityScore).toBe(95);
 
       // COUNT
-      const count = DraftRepository.count();
+      const count = await DraftRepository.count();
       expect(count).toBe(1);
 
       // DELETE
-      const deleted = DraftRepository.delete(testDraft.id);
+      const deleted = await DraftRepository.delete(testDraft.id);
       expect(deleted).toBe(true);
       expect(DraftRepository.count()).toBe(0);
     });
@@ -297,17 +297,17 @@ describe('Database Integration Tests', () => {
       const testLog = createTestAgentLog();
       
       // CREATE
-      const created = AgentLogRepository.create(testLog);
+      const created = await AgentLogRepository.create(testLog);
       expect(created.agentType).toBe('DISCOVERY');
       expect(created.status).toBe('SUCCESS');
 
       // READ
-      const found = AgentLogRepository.findById(testLog.id);
+      const found = await AgentLogRepository.findById(testLog.id);
       expect(found).toBeDefined();
       expect(found!.durationMs).toBe(1500);
 
       // FIND ALL with filters
-      const allLogs = AgentLogRepository.findAll({ 
+      const allLogs = await AgentLogRepository.findAll({ 
         agentType: 'DISCOVERY',
         limit: 10 
       });
@@ -315,7 +315,7 @@ describe('Database Integration Tests', () => {
       expect(allLogs[0].agentType).toBe('DISCOVERY');
 
       // STATISTICS
-      const stats = AgentLogRepository.getStatistics();
+      const stats = await AgentLogRepository.getStatistics();
       expect(stats.totalRuns).toBe(1);
       expect(stats.successRate).toBe(100);
       expect(stats.avgDurationMs).toBe(1500);
@@ -325,12 +325,12 @@ describe('Database Integration Tests', () => {
 
     test('SettingsRepository - singleton operations', () => {
       // GET (should return defaults)
-      const settings = SettingsRepository.get();
+      const settings = await SettingsRepository.get();
       expect(settings.adsEnabled).toBe(true);
       expect(settings.siteTitle).toBe('RozgarVaani - India Government Jobs');
 
       // UPDATE
-      const updated = SettingsRepository.update({
+      const updated = await SettingsRepository.update({
         adsEnabled: false,
         siteTitle: 'Test Site',
         autoScanIntervalMinutes: 60
@@ -341,7 +341,7 @@ describe('Database Integration Tests', () => {
       expect(updated.contactEmail).toBe('contact@rozgarvaani.in'); // Unchanged
 
       // Verify persistence
-      const retrieved = SettingsRepository.get();
+      const retrieved = await SettingsRepository.get();
       expect(retrieved.adsEnabled).toBe(false);
       expect(retrieved.siteTitle).toBe('Test Site');
     });
@@ -362,7 +362,7 @@ describe('Database Integration Tests', () => {
       };
 
       JobRepository.create(testJob);
-      const retrieved = JobRepository.findById(testJob.id);
+      const retrieved = await JobRepository.findById(testJob.id);
 
       expect(retrieved!.categoryWiseVacancies).toEqual({
         ur: 40, obc: 30, sc: 20, st: 10, ews: 0
@@ -378,7 +378,7 @@ describe('Database Integration Tests', () => {
       testJob.admitCardDate = undefined;
 
       JobRepository.create(testJob);
-      const retrieved = JobRepository.findById(testJob.id);
+      const retrieved = await JobRepository.findById(testJob.id);
 
       expect(retrieved!.state).toBeUndefined();
       expect(retrieved!.correctionWindow).toBeUndefined();
@@ -394,7 +394,7 @@ describe('Database Integration Tests', () => {
       testJob.isDraft = false;
 
       JobRepository.create(testJob);
-      const retrieved = JobRepository.findById(testJob.id);
+      const retrieved = await JobRepository.findById(testJob.id);
 
       expect(retrieved!.totalVacancies).toBe(500);
       expect(typeof retrieved!.totalVacancies).toBe('number');
@@ -411,7 +411,7 @@ describe('Database Integration Tests', () => {
       testJob.updatedAt = testTime;
 
       JobRepository.create(testJob);
-      const retrieved = JobRepository.findById(testJob.id);
+      const retrieved = await JobRepository.findById(testJob.id);
 
       expect(retrieved!.createdAt).toBe(testTime);
       expect(retrieved!.updatedAt).toBe(testTime);
@@ -585,10 +585,10 @@ describe('Database Integration Tests', () => {
       
       // Simulate API operations that require database
       const testJob = createTestJob();
-      const created = JobRepository.create(testJob);
+      const created = await JobRepository.create(testJob);
       expect(created).toBeDefined();
       
-      const found = JobRepository.findById(testJob.id);
+      const found = await JobRepository.findById(testJob.id);
       expect(found).toBeDefined();
     });
 
@@ -611,7 +611,7 @@ describe('Database Integration Tests', () => {
       // Only proceed with operations if health check passes
       if (health.available && health.responsive) {
         const testLog = createTestAgentLog();
-        const created = AgentLogRepository.create(testLog);
+        const created = await AgentLogRepository.create(testLog);
         expect(created).toBeDefined();
       }
     });
@@ -630,10 +630,10 @@ describe('Database Integration Tests', () => {
         { ...createTestAgentLog(), agentType: 'VERIFICATION', id: `test-verify-${Date.now()}` }
       ];
 
-      const created = DraftRepository.create(testDraft);
+      const created = await DraftRepository.create(testDraft);
       expect(created.agentLogs).toHaveLength(3);
       
-      const retrieved = DraftRepository.findById(testDraft.id);
+      const retrieved = await DraftRepository.findById(testDraft.id);
       expect(retrieved!.agentLogs).toHaveLength(3);
       expect(retrieved!.agentLogs[0].agentType).toBe('DISCOVERY');
     });
@@ -647,7 +647,7 @@ describe('Database Integration Tests', () => {
       JobRepository.create(job1);
       
       // Pipeline should detect duplicate before creating draft
-      const existing = JobRepository.existsByOrgAndAdvNumber(
+      const existing = await JobRepository.existsByOrgAndAdvNumber(
         job1.organization, 
         job1.advertisementNumber!
       );
@@ -668,10 +668,10 @@ describe('Database Integration Tests', () => {
 
       logs.forEach(log => AgentLogRepository.create(log));
 
-      const allLogs = AgentLogRepository.findAll({ limit: 10 });
+      const allLogs = await AgentLogRepository.findAll({ limit: 10 });
       expect(allLogs).toHaveLength(3);
 
-      const stats = AgentLogRepository.getStatistics();
+      const stats = await AgentLogRepository.getStatistics();
       expect(stats.totalRuns).toBe(3);
       expect(stats.byAgent.DISCOVERY).toBeDefined();
       expect(stats.byAgent.CLASSIFICATION).toBeDefined();
@@ -767,7 +767,7 @@ describe('Database Integration Tests', () => {
       expect(results).toHaveLength(5);
 
       // Verify all jobs were created
-      const count = JobRepository.count();
+      const count = await JobRepository.count();
       expect(count).toBe(5);
     });
 

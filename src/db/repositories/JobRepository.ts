@@ -4,15 +4,16 @@
 
 import { getDatabase } from '../database.js';
 import type { GovtJob } from '../../types.js';
+import type { QueryResult } from 'pg';
 
 export class JobRepository {
   /**
    * Create a new job
    */
-  static create(job: GovtJob): GovtJob {
+  static async create(job: GovtJob): Promise<GovtJob> {
     const db = getDatabase();
-    const stmt = db.prepare(`
-      INSERT INTO jobs (
+    await db.query(
+      `INSERT INTO jobs (
         id, slug, title, organization, department, advertisement_number,
         category, state, post_names, total_vacancies, category_wise_vacancies,
         vacancy_details, qualification, qualification_details, age_min, age_max,
@@ -22,62 +23,57 @@ export class JobRepository {
         links, source_info, verification_status, quality_status, is_draft,
         published_at, created_at, updated_at
       ) VALUES (
-        @id, @slug, @title, @organization, @department, @advertisement_number,
-        @category, @state, @post_names, @total_vacancies, @category_wise_vacancies,
-        @vacancy_details, @qualification, @qualification_details, @age_min, @age_max,
-        @age_relaxation, @application_start, @application_end, @fee_payment_deadline,
-        @correction_window, @exam_date, @admit_card_date, @result_date, @application_fee,
-        @salary, @selection_process, @how_to_apply, @overview, @status, @is_closing_soon,
-        @links, @source_info, @verification_status, @quality_status, @is_draft,
-        @published_at, @created_at, @updated_at
-      )
-    `);
-
-    stmt.run({
-      id: job.id,
-      slug: job.slug,
-      title: job.title,
-      organization: job.organization,
-      department: job.department,
-      advertisement_number: job.advertisementNumber || null,
-      category: job.category,
-      state: job.state || null,
-      post_names: JSON.stringify(job.postNames),
-      total_vacancies: job.totalVacancies,
-      category_wise_vacancies: job.categoryWiseVacancies
-        ? JSON.stringify(job.categoryWiseVacancies)
-        : null,
-      vacancy_details: job.vacancyDetails
-        ? JSON.stringify(job.vacancyDetails)
-        : null,
-      qualification: job.qualification,
-      qualification_details: job.qualificationDetails,
-      age_min: job.ageMin,
-      age_max: job.ageMax,
-      age_relaxation: job.ageRelaxation,
-      application_start: job.applicationStart,
-      application_end: job.applicationEnd,
-      fee_payment_deadline: job.feePaymentDeadline,
-      correction_window: job.correctionWindow || null,
-      exam_date: job.examDate,
-      admit_card_date: job.admitCardDate || null,
-      result_date: job.resultDate || null,
-      application_fee: JSON.stringify(job.applicationFee),
-      salary: JSON.stringify(job.salary),
-      selection_process: JSON.stringify(job.selectionProcess),
-      how_to_apply: JSON.stringify(job.howToApply),
-      overview: job.overview,
-      status: job.status,
-      is_closing_soon: job.isClosingSoon ? 1 : 0,
-      links: JSON.stringify(job.links),
-      source_info: JSON.stringify(job.sourceInfo),
-      verification_status: job.verificationStatus,
-      quality_status: job.qualityStatus,
-      is_draft: job.isDraft ? 1 : 0,
-      published_at: job.publishedAt || null,
-      created_at: job.createdAt,
-      updated_at: job.updatedAt,
-    });
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21,
+        $22, $23, $24, $25, $26,
+        $27, $28, $29, $30, $31,
+        $32, $33, $34, $35, $36,
+        $37, $38, $39
+      )`,
+      [
+        job.id,
+        job.slug,
+        job.title,
+        job.organization,
+        job.department,
+        job.advertisementNumber || null,
+        job.category,
+        job.state || null,
+        JSON.stringify(job.postNames),
+        job.totalVacancies,
+        job.categoryWiseVacancies ? JSON.stringify(job.categoryWiseVacancies) : null,
+        job.vacancyDetails ? JSON.stringify(job.vacancyDetails) : null,
+        job.qualification,
+        job.qualificationDetails,
+        job.ageMin,
+        job.ageMax,
+        job.ageRelaxation,
+        job.applicationStart,
+        job.applicationEnd,
+        job.feePaymentDeadline,
+        job.correctionWindow || null,
+        job.examDate,
+        job.admitCardDate || null,
+        job.resultDate || null,
+        JSON.stringify(job.applicationFee),
+        JSON.stringify(job.salary),
+        JSON.stringify(job.selectionProcess),
+        JSON.stringify(job.howToApply),
+        job.overview,
+        job.status,
+        job.isClosingSoon,
+        JSON.stringify(job.links),
+        JSON.stringify(job.sourceInfo),
+        job.verificationStatus,
+        job.qualityStatus,
+        job.isDraft,
+        job.publishedAt || null,
+        job.createdAt,
+        job.updatedAt,
+      ]
+    );
 
     return job;
   }
@@ -85,165 +81,162 @@ export class JobRepository {
   /**
    * Find job by ID
    */
-  static findById(id: string): GovtJob | null {
+  static async findById(id: string): Promise<GovtJob | null> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM jobs WHERE id = ?');
-    const row = stmt.get(id) as any;
+    const result = await db.query('SELECT * FROM jobs WHERE id = $1', [id]);
+    const row = result.rows[0];
     return row ? this.mapRowToJob(row) : null;
   }
 
   /**
    * Find job by slug
    */
-  static findBySlug(slug: string): GovtJob | null {
+  static async findBySlug(slug: string): Promise<GovtJob | null> {
     const db = getDatabase();
-    const stmt = db.prepare('SELECT * FROM jobs WHERE slug = ?');
-    const row = stmt.get(slug) as any;
+    const result = await db.query('SELECT * FROM jobs WHERE slug = $1', [slug]);
+    const row = result.rows[0];
     return row ? this.mapRowToJob(row) : null;
   }
 
   /**
    * Get all jobs with optional filters
    */
-  static findAll(filters?: {
+  static async findAll(filters?: {
     category?: string;
     status?: string;
     isDraft?: boolean;
     limit?: number;
     offset?: number;
-  }): GovtJob[] {
+  }): Promise<GovtJob[]> {
     const db = getDatabase();
+    const params: any[] = [];
+    let paramIndex = 1;
     let query = 'SELECT * FROM jobs WHERE 1=1';
-    const params: any = {};
 
     if (filters?.category) {
-      query += ' AND category = @category';
-      params.category = filters.category;
+      query += ` AND category = $${paramIndex++}`;
+      params.push(filters.category);
     }
 
     if (filters?.status) {
-      query += ' AND status = @status';
-      params.status = filters.status;
+      query += ` AND status = $${paramIndex++}`;
+      params.push(filters.status);
     }
 
     if (filters?.isDraft !== undefined) {
-      query += ' AND is_draft = @is_draft';
-      params.is_draft = filters.isDraft ? 1 : 0;
+      query += ` AND is_draft = $${paramIndex++}`;
+      params.push(filters.isDraft);
     }
 
     query += ' ORDER BY created_at DESC';
 
     if (filters?.limit) {
-      query += ' LIMIT @limit';
-      params.limit = filters.limit;
+      query += ` LIMIT $${paramIndex++}`;
+      params.push(filters.limit);
     }
 
     if (filters?.offset) {
-      query += ' OFFSET @offset';
-      params.offset = filters.offset;
+      query += ` OFFSET $${paramIndex++}`;
+      params.push(filters.offset);
     }
 
-    const stmt = db.prepare(query);
-    const rows = stmt.all(params) as any[];
-    return rows.map((row) => this.mapRowToJob(row));
+    const result = await db.query(query, params);
+    return result.rows.map((row) => this.mapRowToJob(row));
   }
 
   /**
    * Update job
    */
-  static update(id: string, updates: Partial<GovtJob>): GovtJob | null {
-    const existing = this.findById(id);
+  static async update(id: string, updates: Partial<GovtJob>): Promise<GovtJob | null> {
+    const existing = await this.findById(id);
     if (!existing) return null;
 
     const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    
-    const db = getDatabase();
-    const stmt = db.prepare(`
-      UPDATE jobs SET
-        slug = @slug,
-        title = @title,
-        organization = @organization,
-        department = @department,
-        advertisement_number = @advertisement_number,
-        category = @category,
-        state = @state,
-        post_names = @post_names,
-        total_vacancies = @total_vacancies,
-        category_wise_vacancies = @category_wise_vacancies,
-        vacancy_details = @vacancy_details,
-        qualification = @qualification,
-        qualification_details = @qualification_details,
-        age_min = @age_min,
-        age_max = @age_max,
-        age_relaxation = @age_relaxation,
-        application_start = @application_start,
-        application_end = @application_end,
-        fee_payment_deadline = @fee_payment_deadline,
-        correction_window = @correction_window,
-        exam_date = @exam_date,
-        admit_card_date = @admit_card_date,
-        result_date = @result_date,
-        application_fee = @application_fee,
-        salary = @salary,
-        selection_process = @selection_process,
-        how_to_apply = @how_to_apply,
-        overview = @overview,
-        status = @status,
-        is_closing_soon = @is_closing_soon,
-        links = @links,
-        source_info = @source_info,
-        verification_status = @verification_status,
-        quality_status = @quality_status,
-        is_draft = @is_draft,
-        published_at = @published_at,
-        updated_at = @updated_at
-      WHERE id = @id
-    `);
 
-    stmt.run({
-      id: updated.id,
-      slug: updated.slug,
-      title: updated.title,
-      organization: updated.organization,
-      department: updated.department,
-      advertisement_number: updated.advertisementNumber || null,
-      category: updated.category,
-      state: updated.state || null,
-      post_names: JSON.stringify(updated.postNames),
-      total_vacancies: updated.totalVacancies,
-      category_wise_vacancies: updated.categoryWiseVacancies
-        ? JSON.stringify(updated.categoryWiseVacancies)
-        : null,
-      vacancy_details: updated.vacancyDetails
-        ? JSON.stringify(updated.vacancyDetails)
-        : null,
-      qualification: updated.qualification,
-      qualification_details: updated.qualificationDetails,
-      age_min: updated.ageMin,
-      age_max: updated.ageMax,
-      age_relaxation: updated.ageRelaxation,
-      application_start: updated.applicationStart,
-      application_end: updated.applicationEnd,
-      fee_payment_deadline: updated.feePaymentDeadline,
-      correction_window: updated.correctionWindow || null,
-      exam_date: updated.examDate,
-      admit_card_date: updated.admitCardDate || null,
-      result_date: updated.resultDate || null,
-      application_fee: JSON.stringify(updated.applicationFee),
-      salary: JSON.stringify(updated.salary),
-      selection_process: JSON.stringify(updated.selectionProcess),
-      how_to_apply: JSON.stringify(updated.howToApply),
-      overview: updated.overview,
-      status: updated.status,
-      is_closing_soon: updated.isClosingSoon ? 1 : 0,
-      links: JSON.stringify(updated.links),
-      source_info: JSON.stringify(updated.sourceInfo),
-      verification_status: updated.verificationStatus,
-      quality_status: updated.qualityStatus,
-      is_draft: updated.isDraft ? 1 : 0,
-      published_at: updated.publishedAt || null,
-      updated_at: updated.updatedAt,
-    });
+    const db = getDatabase();
+    await db.query(
+      `UPDATE jobs SET
+        slug = $1,
+        title = $2,
+        organization = $3,
+        department = $4,
+        advertisement_number = $5,
+        category = $6,
+        state = $7,
+        post_names = $8,
+        total_vacancies = $9,
+        category_wise_vacancies = $10,
+        vacancy_details = $11,
+        qualification = $12,
+        qualification_details = $13,
+        age_min = $14,
+        age_max = $15,
+        age_relaxation = $16,
+        application_start = $17,
+        application_end = $18,
+        fee_payment_deadline = $19,
+        correction_window = $20,
+        exam_date = $21,
+        admit_card_date = $22,
+        result_date = $23,
+        application_fee = $24,
+        salary = $25,
+        selection_process = $26,
+        how_to_apply = $27,
+        overview = $28,
+        status = $29,
+        is_closing_soon = $30,
+        links = $31,
+        source_info = $32,
+        verification_status = $33,
+        quality_status = $34,
+        is_draft = $35,
+        published_at = $36,
+        updated_at = $37
+      WHERE id = $38`,
+      [
+        updated.slug,
+        updated.title,
+        updated.organization,
+        updated.department,
+        updated.advertisementNumber || null,
+        updated.category,
+        updated.state || null,
+        JSON.stringify(updated.postNames),
+        updated.totalVacancies,
+        updated.categoryWiseVacancies
+          ? JSON.stringify(updated.categoryWiseVacancies)
+          : null,
+        updated.vacancyDetails ? JSON.stringify(updated.vacancyDetails) : null,
+        updated.qualification,
+        updated.qualificationDetails,
+        updated.ageMin,
+        updated.ageMax,
+        updated.ageRelaxation,
+        updated.applicationStart,
+        updated.applicationEnd,
+        updated.feePaymentDeadline,
+        updated.correctionWindow || null,
+        updated.examDate,
+        updated.admitCardDate || null,
+        updated.resultDate || null,
+        JSON.stringify(updated.applicationFee),
+        JSON.stringify(updated.salary),
+        JSON.stringify(updated.selectionProcess),
+        JSON.stringify(updated.howToApply),
+        updated.overview,
+        updated.status,
+        updated.isClosingSoon,
+        JSON.stringify(updated.links),
+        JSON.stringify(updated.sourceInfo),
+        updated.verificationStatus,
+        updated.qualityStatus,
+        updated.isDraft,
+        updated.publishedAt || null,
+        updated.updatedAt,
+        updated.id,
+      ]
+    );
 
     return updated;
   }
@@ -251,49 +244,48 @@ export class JobRepository {
   /**
    * Delete job by ID
    */
-  static delete(id: string): boolean {
+  static async delete(id: string): Promise<boolean> {
     const db = getDatabase();
-    const stmt = db.prepare('DELETE FROM jobs WHERE id = ?');
-    const result = stmt.run(id);
-    return result.changes > 0;
+    const result = await db.query('DELETE FROM jobs WHERE id = $1', [id]);
+    return result.rowCount! > 0;
   }
 
   /**
    * Count jobs with optional filters
    */
-  static count(filters?: { category?: string; status?: string }): number {
+  static async count(filters?: { category?: string; status?: string }): Promise<number> {
     const db = getDatabase();
+    const params: any[] = [];
+    let paramIndex = 1;
     let query = 'SELECT COUNT(*) as count FROM jobs WHERE 1=1';
-    const params: any = {};
 
     if (filters?.category) {
-      query += ' AND category = @category';
-      params.category = filters.category;
+      query += ` AND category = $${paramIndex++}`;
+      params.push(filters.category);
     }
 
     if (filters?.status) {
-      query += ' AND status = @status';
-      params.status = filters.status;
+      query += ` AND status = $${paramIndex++}`;
+      params.push(filters.status);
     }
 
-    const stmt = db.prepare(query);
-    const result = stmt.get(params) as { count: number };
-    return result.count;
+    const result = await db.query(query, params);
+    return parseInt(result.rows[0].count, 10);
   }
 
   /**
    * Check if job exists by organization and advertisement number (duplicate check)
    */
-  static existsByOrgAndAdvNumber(
+  static async existsByOrgAndAdvNumber(
     organization: string,
     advertisementNumber: string
-  ): boolean {
+  ): Promise<boolean> {
     const db = getDatabase();
-    const stmt = db.prepare(
-      'SELECT COUNT(*) as count FROM jobs WHERE organization = ? AND advertisement_number = ?'
+    const result = await db.query(
+      'SELECT COUNT(*) as count FROM jobs WHERE organization = $1 AND advertisement_number = $2',
+      [organization, advertisementNumber]
     );
-    const result = stmt.get(organization, advertisementNumber) as { count: number };
-    return result.count > 0;
+    return parseInt(result.rows[0].count, 10) > 0;
   }
 
   /**
@@ -309,14 +301,10 @@ export class JobRepository {
       advertisementNumber: row.advertisement_number,
       category: row.category,
       state: row.state,
-      postNames: JSON.parse(row.post_names),
+      postNames: row.post_names,
       totalVacancies: row.total_vacancies,
-      categoryWiseVacancies: row.category_wise_vacancies
-        ? JSON.parse(row.category_wise_vacancies)
-        : undefined,
-      vacancyDetails: row.vacancy_details
-        ? JSON.parse(row.vacancy_details)
-        : undefined,
+      categoryWiseVacancies: row.category_wise_vacancies,
+      vacancyDetails: row.vacancy_details,
       qualification: row.qualification,
       qualificationDetails: row.qualification_details,
       ageMin: row.age_min,
@@ -329,18 +317,18 @@ export class JobRepository {
       examDate: row.exam_date,
       admitCardDate: row.admit_card_date,
       resultDate: row.result_date,
-      applicationFee: JSON.parse(row.application_fee),
-      salary: JSON.parse(row.salary),
-      selectionProcess: JSON.parse(row.selection_process),
-      howToApply: JSON.parse(row.how_to_apply),
+      applicationFee: row.application_fee,
+      salary: row.salary,
+      selectionProcess: row.selection_process,
+      howToApply: row.how_to_apply,
       overview: row.overview,
       status: row.status,
-      isClosingSoon: row.is_closing_soon === 1,
-      links: JSON.parse(row.links),
-      sourceInfo: JSON.parse(row.source_info),
+      isClosingSoon: row.is_closing_soon,
+      links: row.links,
+      sourceInfo: row.source_info,
       verificationStatus: row.verification_status,
       qualityStatus: row.quality_status,
-      isDraft: row.is_draft === 1,
+      isDraft: row.is_draft,
       publishedAt: row.published_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
