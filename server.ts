@@ -42,6 +42,12 @@ import {
 import { scraperScheduler } from './src/services/scraperScheduler.js';
 import { sarkariResultScraper } from './src/services/webScraperService.js';
 import { persistentPipelineService } from './src/services/persistentPipelineService.js';
+import { 
+  generateChatbotResponse, 
+  testChatbotConnection, 
+  getSuggestedQuestions,
+  extractJobEntities 
+} from './src/services/jobChatbotService.js';
 
 // ── DATABASE IMPORTS ─────────────────────────────────────────────────────────
 import {
@@ -1040,6 +1046,110 @@ app.get('/api/admin/audit-logs', async (req, res) => {
   } catch (error) {
     console.error('[API] Error fetching audit logs:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch audit logs' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHATBOT API ENDPOINTS (Public - No Auth Required)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// POST /api/chatbot/chat - Generate chatbot response
+app.post('/api/chatbot/chat', async (req, res) => {
+  const { message, conversationHistory } = req.body;
+
+  if (!message || typeof message !== 'string' || message.trim().length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Message is required'
+    });
+  }
+
+  // Limit message length to prevent abuse
+  if (message.length > 1000) {
+    return res.status(400).json({
+      success: false,
+      message: 'Message too long. Please limit to 1000 characters.'
+    });
+  }
+
+  try {
+    // Build context with current job data
+    const context: any = {};
+
+    if (isDatabaseAvailable()) {
+      try {
+        const recentJobs = await JobRepository.findAll({ limit: 10, isDraft: false });
+        context.recentJobs = recentJobs;
+
+        // Extract unique categories
+        const allJobs = await JobRepository.findAll({ isDraft: false });
+        const categories = [...new Set(allJobs.map(job => job.category))];
+        context.categories = categories;
+      } catch (dbError) {
+        console.warn('[Chatbot] Could not fetch job context:', dbError);
+      }
+    }
+
+    // Generate response
+    const response = await generateChatbotResponse(
+      message,
+      conversationHistory || [],
+      context
+    );
+
+    res.json({
+      success: response.success,
+      message: response.message,
+      sources: response.sources,
+      confidence: response.confidence
+    });
+
+  } catch (error: any) {
+    console.error('[Chatbot] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate response. Please try again.'
+    });
+  }
+});
+
+// GET /api/chatbot/suggestions - Get suggested questions
+app.get('/api/chatbot/suggestions', (req, res) => {
+  const suggestions = getSuggestedQuestions();
+  res.json({
+    success: true,
+    suggestions
+  });
+});
+
+// GET /api/chatbot/extract-entities - Extract job-related entities from text
+app.post('/api/chatbot/extract-entities', (req, res) => {
+  const { message } = req.body;
+
+  if (!message) {
+    return res.status(400).json({
+      success: false,
+      message: 'Message is required'
+    });
+  }
+
+  const entities = extractJobEntities(message);
+  res.json({
+    success: true,
+    entities
+  });
+});
+
+// GET /api/chatbot/test - Test chatbot connection (admin only)
+app.get('/api/chatbot/test', async (req, res) => {
+  try {
+    const result = await testChatbotConnection();
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
 });
 

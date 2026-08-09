@@ -13,6 +13,7 @@ import { ResultsView } from './components/public/ResultsView';
 import { AdmitCardsView } from './components/public/AdmitCardsView';
 import { AnswerKeysView } from './components/public/AnswerKeysView';
 import { StaticPages } from './components/public/StaticPages';
+import { JobChatBot } from './components/public/JobChatBot';
 
 // Admin Components
 import { AdminLogin } from './components/admin/AdminLogin';
@@ -36,6 +37,7 @@ export default function App() {
   const [publicTab, setPublicTab] = useState<string>('home');
   const [selectedJob, setSelectedJob] = useState<GovtJob | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isChatbotOpen, setIsChatbotOpen] = useState<boolean>(false);
 
   // Admin State
   const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
@@ -332,6 +334,9 @@ export default function App() {
 
       {/* Public Footer */}
       <Footer onNavClick={(t) => handleNavigatePublicTab(t)} />
+
+      {/* Job Chatbot Assistant */}
+      <JobChatBot isOpen={isChatbotOpen} onToggle={() => setIsChatbotOpen(!isChatbotOpen)} />
 
       {/* Secret Floating Admin Switcher Button for Testing/Demo Access */}
       <div className="fixed bottom-4 right-4 z-40 opacity-30 hover:opacity-100 transition-opacity">
