@@ -20,7 +20,7 @@ export const SCHEMA_VERSION = 1;
 export const JOBS_TABLE = `
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
-  slug TEXT NOT NULL UNIQUE,
+  slug TEXT NOT NULL,
   title TEXT NOT NULL,
   organization TEXT NOT NULL,
   department TEXT NOT NULL,
@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_org_adv ON jobs(organization, advertisement_
 export const DRAFTS_TABLE = `
 CREATE TABLE IF NOT EXISTS drafts (
   id TEXT PRIMARY KEY,
-  slug TEXT NOT NULL UNIQUE,
+  slug TEXT NOT NULL,
   title TEXT NOT NULL,
   organization TEXT NOT NULL,
   department TEXT NOT NULL,
@@ -327,6 +327,55 @@ CREATE INDEX IF NOT EXISTS idx_ad_campaigns_placement ON ad_campaigns(placement)
 `;
 
 /**
+ * Pipeline sessions table - tracks end-to-end pipeline execution state
+ * Persists data across hard refreshes and allows admin to resume/fix pipelines
+ */
+export const PIPELINE_SESSIONS_TABLE = `
+CREATE TABLE IF NOT EXISTS pipeline_sessions (
+  id TEXT PRIMARY KEY,
+  source_name TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  raw_text TEXT NOT NULL,
+  current_agent_index INTEGER NOT NULL DEFAULT 0,
+  current_status TEXT NOT NULL CHECK(current_status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'BLOCKED_REVIEW')) DEFAULT 'PENDING',
+  current_draft JSONB,
+  completed_agents JSONB NOT NULL DEFAULT '[]',
+  failed_agent TEXT,
+  failure_reason TEXT,
+  admin_review_notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  
+  INDEX idx_pipeline_sessions_status (current_status),
+  INDEX idx_pipeline_sessions_created_at (created_at)
+);
+`;
+
+/**
+ * Agent checkpoints table - detailed tracking of each agent's execution
+ * Allows rollback to specific agent and manual editing before continuing
+ */
+export const AGENT_CHECKPOINTS_TABLE = `
+CREATE TABLE IF NOT EXISTS agent_checkpoints (
+  id TEXT PRIMARY KEY,
+  pipeline_session_id TEXT NOT NULL REFERENCES pipeline_sessions(id) ON DELETE CASCADE,
+  agent_name TEXT NOT NULL,
+  agent_index INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('SUCCESS', 'FAILED', 'SKIPPED', 'MANUAL_OVERRIDE')),
+  input_data JSONB NOT NULL,
+  output_data JSONB,
+  error_message TEXT,
+  failure_reason TEXT,
+  admin_notes TEXT,
+  duration_ms INTEGER,
+  executed_at TEXT NOT NULL,
+  
+  INDEX idx_agent_checkpoints_session (pipeline_session_id),
+  INDEX idx_agent_checkpoints_status (status)
+);
+`;
+
+/**
  * All SQL initialization statements in order
  */
 export const INIT_STATEMENTS = [
@@ -340,6 +389,8 @@ export const INIT_STATEMENTS = [
   AUDIT_LOGS_TABLE,
   SITE_SETTINGS_TABLE,
   AD_CAMPAIGNS_TABLE,
+  PIPELINE_SESSIONS_TABLE,
+  AGENT_CHECKPOINTS_TABLE,
 ];
 
 /**

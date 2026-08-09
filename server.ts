@@ -41,6 +41,7 @@ import {
 // ── WEB SCRAPER IMPORTS ──────────────────────────────────────────────────────
 import { scraperScheduler } from './src/services/scraperScheduler.js';
 import { sarkariResultScraper } from './src/services/webScraperService.js';
+import { persistentPipelineService } from './src/services/persistentPipelineService.js';
 
 // ── DATABASE IMPORTS ─────────────────────────────────────────────────────────
 import {
@@ -59,6 +60,8 @@ import {
   AdmitCardRepository,
   AnswerKeyRepository,
   ExamResultRepository,
+  PipelineSessionRepository,
+  AgentCheckpointRepository,
 } from './src/db/repositories/index.js';
 
 const app = express();
@@ -1076,8 +1079,190 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-// ─── NVIDIA MULTI-AGENT PIPELINE ─────────────────────────────────────────────
-// POST /api/admin/pipeline/run
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN PIPELINE MANAGEMENT (PERSISTENT STATE WITH FAILURE TRACKING)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// POST /api/admin/pipeline/start - Create new pipeline session
+app.post('/api/admin/pipeline/start', requireDatabase, async (req, res) => {
+  const { rawText, sourceName, sourceUrl } = req.body;
+
+  if (!rawText || rawText.trim().length < 50) {
+    return res.status(400).json({ success: false, message: 'Raw text must be at least 50 characters' });
+  }
+
+  try {
+    const session = await PipelineSessionRepository.create({
+      source_name: sourceName || 'Manual Input',
+      source_url: sourceUrl || '',
+      raw_text: rawText,
+      current_agent_index: 0,
+      current_status: 'PENDING',
+      current_draft: null,
+      completed_agents: [],
+      failed_agent: null,
+      failure_reason: null,
+      admin_review_notes: null,
+    });
+
+    await logAudit('START_PIPELINE', `Started new pipeline session: ${session.id} from ${session.source_name}`);
+
+    res.json({
+      success: true,
+      message: 'Pipeline session created',
+      sessionId: session.id,
+      data: session,
+    });
+  } catch (error) {
+    console.error('[Pipeline] Error creating session:', error);
+    res.status(500).json({ success: false, message: 'Failed to create pipeline session' });
+  }
+});
+
+// POST /api/admin/pipeline/execute - Run pipeline execution
+app.post('/api/admin/pipeline/execute', requireDatabase, async (req, res) => {
+  const { sessionId } = req.body;
+
+  if (!sessionId) {
+    return res.status(400).json({ success: false, message: 'sessionId is required' });
+  }
+
+  try {
+    const session = await PipelineSessionRepository.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Pipeline session not found' });
+    }
+
+    const { persistentPipelineService } = await import('./src/services/persistentPipelineService.js');
+
+    const result = await persistentPipelineService.executePipeline(sessionId, session.current_draft || {});
+
+    if (result.success) {
+      await logAudit('COMPLETE_PIPELINE', `Pipeline completed successfully: ${sessionId}`);
+      res.json({
+        success: true,
+        message: 'Pipeline execution completed',
+        draft: result.draft,
+      });
+    } else {
+      await logAudit('BLOCK_PIPELINE', `Pipeline blocked for review at ${result.failedAt}: ${result.error}`);
+      res.json({
+        success: false,
+        message: `Pipeline execution blocked at ${result.failedAt}`,
+        error: result.error,
+        failedAt: result.failedAt,
+        sessionId,
+      });
+    }
+  } catch (error) {
+    console.error('[Pipeline] Error executing pipeline:', error);
+    res.status(500).json({ success: false, message: 'Pipeline execution error' });
+  }
+});
+
+// GET /api/admin/pipeline/sessions - List all pipeline sessions
+app.get('/api/admin/pipeline/sessions', async (req, res) => {
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const { status, limit = 50, offset = 0 } = req.query;
+    const sessions = await PipelineSessionRepository.findAll({
+      limit: Math.min(parseInt(limit as string) || 50, 500),
+      offset: parseInt(offset as string) || 0,
+      status: status as string,
+    });
+
+    res.json({
+      success: true,
+      count: sessions.length,
+      data: sessions,
+    });
+  } catch (error) {
+    console.error('[Pipeline] Error fetching sessions:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch pipeline sessions' });
+  }
+});
+
+// GET /api/admin/pipeline/sessions/:id - Get specific session with checkpoints
+app.get('/api/admin/pipeline/sessions/:id', async (req, res) => {
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const session = await PipelineSessionRepository.findById(req.params.id);
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    const checkpoints = await AgentCheckpointRepository.findByPipelineSessionId(req.params.id);
+
+    res.json({
+      success: true,
+      data: {
+        session,
+        checkpoints,
+      },
+    });
+  } catch (error) {
+    console.error('[Pipeline] Error fetching session:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch session' });
+  }
+});
+
+// POST /api/admin/pipeline/sessions/:id/fix - Admin manually fixes failed agent output and resumes
+app.post('/api/admin/pipeline/sessions/:id/fix', requireDatabase, async (req, res) => {
+  const { agentIndex, fixedData, adminNotes } = req.body;
+
+  if (agentIndex === undefined) {
+    return res.status(400).json({ success: false, message: 'agentIndex is required' });
+  }
+
+  try {
+    const session = await PipelineSessionRepository.findById(req.params.id);
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    if (session.current_status !== 'BLOCKED_REVIEW') {
+      return res.status(400).json({ success: false, message: 'Session is not blocked for review' });
+    }
+
+    // Update session with fixed data
+    await PipelineSessionRepository.update(req.params.id, {
+      current_agent_index: agentIndex,
+      current_status: 'RUNNING',
+      current_draft: fixedData || session.current_draft,
+      admin_review_notes: adminNotes || '',
+      failed_agent: null,
+      failure_reason: null,
+    });
+
+    // Update checkpoint with admin notes
+    if (session.failed_agent) {
+      const checkpoint = await AgentCheckpointRepository.findBySessionAndAgent(req.params.id, session.failed_agent);
+      if (checkpoint) {
+        await AgentCheckpointRepository.updateWithAdminNotes(checkpoint.id, adminNotes || '', fixedData);
+      }
+    }
+
+    await logAudit('FIX_PIPELINE', `Admin manually fixed pipeline ${req.params.id} at agent ${session.failed_agent}`);
+
+    res.json({
+      success: true,
+      message: 'Pipeline fixed and ready to resume',
+      sessionId: req.params.id,
+    });
+  } catch (error) {
+    console.error('[Pipeline] Error fixing session:', error);
+    res.status(500).json({ success: false, message: 'Failed to fix pipeline session' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NVIDIA MULTI-AGENT PIPELINE
 // Executes the full 12-stage NVIDIA Nemotron Nano 9B pipeline.
 // Gemini is no longer used here. One model, 12 agents, separate prompts.
 app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
