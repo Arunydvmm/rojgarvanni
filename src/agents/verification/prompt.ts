@@ -19,19 +19,43 @@ For each critical field, determine:
 1. Is the value present and correctly extracted from the source?
 2. Is there any discrepancy between extracted value and source text?
 3. What is your confidence in the extracted value?
+4. Is the field EXPLICITLY supported by the source, or INFERRED/HALLUCINATED?
 
-CRITICAL FIELDS TO VERIFY (always check these):
-- title, organization, total_vacancies, qualification, age_min, age_max,
-  application_start, application_end, official_website_url, advertisement_number
+CRITICAL FIELDS TO VERIFY (MUST be supported by source evidence):
+- organization: Explicit organization name from source
+- title: Specific recruitment/post name from source
+- total_vacancies: Actual vacancy count from source (never inferred)
+- qualification: Eligibility stated in source
+- age_min, age_max: Age limits stated in source
+- application_start: Start date from source
+- application_end: End date from source
+- official_website_url: Official link from source
+
+FIELDS THAT MUST NOT BE HALLUCINATED:
+- Any numeric field (dates, ages, vacancies) must come from the source text
+- Never infer missing dates (e.g., "add 30 days to application end")
+- Never invent vacancy breakdowns if not in source
+- Never estimate salary if not stated
+- If information is missing from source, mark it NULL — never fabricate
 
 VERIFICATION DECISION:
-- PASSED: All critical fields verified with confidence >= 0.85 and no critical errors.
-- FAILED: Any critical field has a discrepancy, is fabricated, or confidence < 0.7.
+- PASSED: All CRITICAL fields present in source with confidence >= 0.85, no fabrication detected
+- FAILED: Any critical field missing from source, fabricated, ambiguous, or confidence < 0.75
 
 ABSOLUTE RULES:
-- Base every decision ONLY on what is written in the source text.
-- Do NOT accept values that are not supported by the source text.
-- If the source text is ambiguous, mark confidence lower but do NOT fail unless there is an actual contradiction.
+- Base EVERY decision ONLY on what is written in the source text.
+- Do NOT accept inferred/hallucinated values.
+- If information is not in the source, flag it as MISSING, not PASSED.
+- Generic information (default age, default vacancy) is SUSPICIOUS and should fail verification.
+- A scraped "homepage title" with no detail page content → FAILED
+
+FAILURE INDICATORS:
+- "No official organization found in source"
+- "No specific post name in source"
+- "Vacancy number inferred, not stated"
+- "Age limits not supported by source"
+- "Application dates missing from source"
+- "No official website URL provided"
 
 JSON OUTPUT (REQUIRED):
 Return ONLY one valid JSON object, nothing else.
@@ -46,7 +70,8 @@ Do not use trailing commas.
   "checked_fields": [
     {
       "field": string,
-      "extracted_value": string,
+      "extracted_value": string | null,
+      "found_in_source": boolean,
       "verified": boolean,
       "confidence": number (0.0–1.0),
       "evidence": string,
@@ -55,5 +80,7 @@ Do not use trailing commas.
   ],
   "critical_errors": string[],
   "warnings": string[],
-  "evidence_text": string
+  "missing_critical_fields": string[],
+  "evidence_text": string,
+  "hallucination_detected": boolean
 }`;
