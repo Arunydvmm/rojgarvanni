@@ -612,6 +612,118 @@ app.get('/api/admin/sources', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN PUBLISHED JOBS MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/admin/jobs
+// List all published jobs with pagination and filters
+app.get('/api/admin/jobs', async (req, res) => {
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const { category, status, search, limit = 50, offset = 0 } = req.query;
+    const parseLimit = Math.min(parseInt(limit as string) || 50, 500);
+    const parseOffset = parseInt(offset as string) || 0;
+
+    let jobs = await JobRepository.findAll({ isDraft: false, limit: parseLimit + 1, offset: parseOffset });
+
+    // Apply filters if provided
+    if (category && typeof category === 'string' && category !== 'All') {
+      jobs = jobs.filter((j) => j.category.toLowerCase() === category.toLowerCase());
+    }
+
+    if (status && typeof status === 'string' && status !== 'All') {
+      jobs = jobs.filter((j) => j.status.toLowerCase() === status.toLowerCase());
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      const q = search.toLowerCase().trim();
+      jobs = jobs.filter(
+        (j) =>
+          j.title.toLowerCase().includes(q) ||
+          j.organization.toLowerCase().includes(q) ||
+          j.category.toLowerCase().includes(q)
+      );
+    }
+
+    res.json({
+      success: true,
+      count: jobs.length,
+      data: jobs,
+    });
+  } catch (error) {
+    console.error('[API] Error fetching published jobs:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch published jobs' });
+  }
+});
+
+// GET /api/admin/jobs/:id
+// Get specific published job details
+app.get('/api/admin/jobs/:id', async (req, res) => {
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const job = await JobRepository.findById(req.params.id);
+    if (!job || job.isDraft) {
+      return res.status(404).json({ success: false, message: 'Published job not found' });
+    }
+
+    res.json({ success: true, data: job });
+  } catch (error) {
+    console.error('[API] Error fetching job:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch job' });
+  }
+});
+
+// PUT /api/admin/jobs/:id
+// Edit published job
+app.put('/api/admin/jobs/:id', requireDatabase, async (req, res) => {
+  try {
+    const job = await JobRepository.findById(req.params.id);
+    if (!job || job.isDraft) {
+      return res.status(404).json({ success: false, message: 'Published job not found' });
+    }
+
+    const updates = req.body;
+    const updatedJob = await JobRepository.update(req.params.id, updates);
+
+    await logAudit('EDIT_JOB', `Edited published job: ${updatedJob?.title}`);
+    res.json({ success: true, message: 'Job updated successfully', data: updatedJob });
+  } catch (error) {
+    console.error('[API] Error updating job:', error);
+    res.status(500).json({ success: false, message: 'Failed to update job' });
+  }
+});
+
+// DELETE /api/admin/jobs/:id
+// Delete published job
+app.delete('/api/admin/jobs/:id', requireDatabase, async (req, res) => {
+  try {
+    const job = await JobRepository.findById(req.params.id);
+    if (!job || job.isDraft) {
+      return res.status(404).json({ success: false, message: 'Published job not found' });
+    }
+
+    const jobTitle = job.title;
+    const deleted = await JobRepository.delete(req.params.id);
+
+    if (deleted) {
+      await logAudit('DELETE_JOB', `Deleted published job: ${jobTitle}`);
+      res.json({ success: true, message: 'Job deleted successfully' });
+    } else {
+      res.status(500).json({ success: false, message: 'Failed to delete job' });
+    }
+  } catch (error) {
+    console.error('[API] Error deleting job:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete job' });
+  }
+});
+
 // POST /api/admin/sources
 app.post('/api/admin/sources', requireDatabase, async (req, res) => {
   const { name, url, type, crawlFrequency, permissionNotes } = req.body;
@@ -640,6 +752,225 @@ app.post('/api/admin/sources', requireDatabase, async (req, res) => {
   } catch (error) {
     console.error('[API] Error creating source:', error);
     res.status(500).json({ success: false, message: 'Failed to create source' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN EXAM RESULTS MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/admin/results
+app.get('/api/admin/results', async (req, res) => {
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const { status, search, limit = 50, offset = 0 } = req.query;
+    const parseLimit = Math.min(parseInt(limit as string) || 50, 500);
+    const parseOffset = parseInt(offset as string) || 0;
+
+    let results = await ExamResultRepository.findAll({ isDraft: false, limit: parseLimit + 1, offset: parseOffset });
+
+    if (status && typeof status === 'string' && status !== 'All') {
+      results = results.filter((r) => r.status.toLowerCase() === status.toLowerCase());
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      const q = search.toLowerCase().trim();
+      results = results.filter(
+        (r) =>
+          r.title.toLowerCase().includes(q) ||
+          r.organization.toLowerCase().includes(q) ||
+          r.examName.toLowerCase().includes(q)
+      );
+    }
+
+    res.json({ success: true, count: results.length, data: results });
+  } catch (error) {
+    console.error('[API] Error fetching exam results:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch exam results' });
+  }
+});
+
+// PUT /api/admin/results/:id
+app.put('/api/admin/results/:id', requireDatabase, async (req, res) => {
+  try {
+    const result = await ExamResultRepository.findById(req.params.id);
+    if (!result || result.isDraft) {
+      return res.status(404).json({ success: false, message: 'Exam result not found' });
+    }
+
+    const updated = await ExamResultRepository.update(req.params.id, req.body);
+    await logAudit('EDIT_RESULT', `Edited exam result: ${updated?.title}`);
+    res.json({ success: true, message: 'Exam result updated', data: updated });
+  } catch (error) {
+    console.error('[API] Error updating exam result:', error);
+    res.status(500).json({ success: false, message: 'Failed to update exam result' });
+  }
+});
+
+// DELETE /api/admin/results/:id
+app.delete('/api/admin/results/:id', requireDatabase, async (req, res) => {
+  try {
+    const result = await ExamResultRepository.findById(req.params.id);
+    if (!result || result.isDraft) {
+      return res.status(404).json({ success: false, message: 'Exam result not found' });
+    }
+
+    const title = result.title;
+    await ExamResultRepository.delete(req.params.id);
+    await logAudit('DELETE_RESULT', `Deleted exam result: ${title}`);
+    res.json({ success: true, message: 'Exam result deleted' });
+  } catch (error) {
+    console.error('[API] Error deleting exam result:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete exam result' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN ADMIT CARDS MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/admin/admit-cards
+app.get('/api/admin/admit-cards', async (req, res) => {
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const { status, search, limit = 50, offset = 0 } = req.query;
+    const parseLimit = Math.min(parseInt(limit as string) || 50, 500);
+    const parseOffset = parseInt(offset as string) || 0;
+
+    let cards = await AdmitCardRepository.findAll({ isDraft: false, limit: parseLimit + 1, offset: parseOffset });
+
+    if (status && typeof status === 'string' && status !== 'All') {
+      cards = cards.filter((c) => c.status.toLowerCase() === status.toLowerCase());
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      const q = search.toLowerCase().trim();
+      cards = cards.filter(
+        (c) =>
+          c.title.toLowerCase().includes(q) ||
+          c.organization.toLowerCase().includes(q) ||
+          c.examName.toLowerCase().includes(q)
+      );
+    }
+
+    res.json({ success: true, count: cards.length, data: cards });
+  } catch (error) {
+    console.error('[API] Error fetching admit cards:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch admit cards' });
+  }
+});
+
+// PUT /api/admin/admit-cards/:id
+app.put('/api/admin/admit-cards/:id', requireDatabase, async (req, res) => {
+  try {
+    const card = await AdmitCardRepository.findById(req.params.id);
+    if (!card || card.isDraft) {
+      return res.status(404).json({ success: false, message: 'Admit card not found' });
+    }
+
+    const updated = await AdmitCardRepository.update(req.params.id, req.body);
+    await logAudit('EDIT_ADMIT_CARD', `Edited admit card: ${updated?.title}`);
+    res.json({ success: true, message: 'Admit card updated', data: updated });
+  } catch (error) {
+    console.error('[API] Error updating admit card:', error);
+    res.status(500).json({ success: false, message: 'Failed to update admit card' });
+  }
+});
+
+// DELETE /api/admin/admit-cards/:id
+app.delete('/api/admin/admit-cards/:id', requireDatabase, async (req, res) => {
+  try {
+    const card = await AdmitCardRepository.findById(req.params.id);
+    if (!card || card.isDraft) {
+      return res.status(404).json({ success: false, message: 'Admit card not found' });
+    }
+
+    const title = card.title;
+    await AdmitCardRepository.delete(req.params.id);
+    await logAudit('DELETE_ADMIT_CARD', `Deleted admit card: ${title}`);
+    res.json({ success: true, message: 'Admit card deleted' });
+  } catch (error) {
+    console.error('[API] Error deleting admit card:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete admit card' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN ANSWER KEYS MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/admin/answer-keys
+app.get('/api/admin/answer-keys', async (req, res) => {
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const { status, search, limit = 50, offset = 0 } = req.query;
+    const parseLimit = Math.min(parseInt(limit as string) || 50, 500);
+    const parseOffset = parseInt(offset as string) || 0;
+
+    let keys = await AnswerKeyRepository.findAll({ isDraft: false, limit: parseLimit + 1, offset: parseOffset });
+
+    if (status && typeof status === 'string' && status !== 'All') {
+      keys = keys.filter((k) => k.status.toLowerCase() === status.toLowerCase());
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      const q = search.toLowerCase().trim();
+      keys = keys.filter(
+        (k) =>
+          k.title.toLowerCase().includes(q) ||
+          k.organization.toLowerCase().includes(q) ||
+          k.examName.toLowerCase().includes(q)
+      );
+    }
+
+    res.json({ success: true, count: keys.length, data: keys });
+  } catch (error) {
+    console.error('[API] Error fetching answer keys:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch answer keys' });
+  }
+});
+
+// PUT /api/admin/answer-keys/:id
+app.put('/api/admin/answer-keys/:id', requireDatabase, async (req, res) => {
+  try {
+    const key = await AnswerKeyRepository.findById(req.params.id);
+    if (!key || key.isDraft) {
+      return res.status(404).json({ success: false, message: 'Answer key not found' });
+    }
+
+    const updated = await AnswerKeyRepository.update(req.params.id, req.body);
+    await logAudit('EDIT_ANSWER_KEY', `Edited answer key: ${updated?.title}`);
+    res.json({ success: true, message: 'Answer key updated', data: updated });
+  } catch (error) {
+    console.error('[API] Error updating answer key:', error);
+    res.status(500).json({ success: false, message: 'Failed to update answer key' });
+  }
+});
+
+// DELETE /api/admin/answer-keys/:id
+app.delete('/api/admin/answer-keys/:id', requireDatabase, async (req, res) => {
+  try {
+    const key = await AnswerKeyRepository.findById(req.params.id);
+    if (!key || key.isDraft) {
+      return res.status(404).json({ success: false, message: 'Answer key not found' });
+    }
+
+    const title = key.title;
+    await AnswerKeyRepository.delete(req.params.id);
+    await logAudit('DELETE_ANSWER_KEY', `Deleted answer key: ${title}`);
+    res.json({ success: true, message: 'Answer key deleted' });
+  } catch (error) {
+    console.error('[API] Error deleting answer key:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete answer key' });
   }
 });
 
