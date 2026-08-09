@@ -25,7 +25,13 @@ ABSOLUTE RULES:
 - Only use data present in the input.
 - slug must be URL-safe (only a-z, 0-9, hyphens).
 
-Return ONLY valid JSON:
+JSON OUTPUT (REQUIRED):
+Return ONLY one valid JSON object, nothing else.
+Do not use markdown code fences.
+Do not write text before or after the JSON.
+Use double quotes.
+Do not use trailing commas.
+
 {
   "slug": string,
   "meta_title": string,

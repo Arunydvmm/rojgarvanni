@@ -27,7 +27,13 @@ ABSOLUTE RULES:
 - Be strict. A missing URL or inconsistent vacancy count must reduce the score.
 - Report specific issues with field names.
 
-Return ONLY valid JSON:
+JSON OUTPUT (REQUIRED):
+Return ONLY one valid JSON object, nothing else.
+Do not use markdown code fences.
+Do not write text before or after the JSON.
+Use double quotes.
+Do not use trailing commas.
+
 {
   "quality_status": "PASSED" | "FAILED",
   "total_score": number (0–100),

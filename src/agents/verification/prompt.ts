@@ -33,7 +33,13 @@ ABSOLUTE RULES:
 - Do NOT accept values that are not supported by the source text.
 - If the source text is ambiguous, mark confidence lower but do NOT fail unless there is an actual contradiction.
 
-Return ONLY valid JSON:
+JSON OUTPUT (REQUIRED):
+Return ONLY one valid JSON object, nothing else.
+Do not use markdown code fences.
+Do not write text before or after the JSON.
+Use double quotes.
+Do not use trailing commas.
+
 {
   "verification_status": "PASSED" | "FAILED",
   "quality_score": number (0–100),
@@ -44,7 +50,7 @@ Return ONLY valid JSON:
       "verified": boolean,
       "confidence": number (0.0–1.0),
       "evidence": string,
-      "issue": string | null
+      "issue": null | string
     }
   ],
   "critical_errors": string[],

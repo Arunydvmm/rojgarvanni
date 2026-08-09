@@ -41,7 +41,13 @@ ABSOLUTE RULES:
 - Only report what you can confirm from the provided data.
 - Do NOT mark READY if any critical field is null or unverified.
 
-Return ONLY valid JSON:
+JSON OUTPUT (REQUIRED):
+Return ONLY one valid JSON object, nothing else.
+Do not use markdown code fences.
+Do not write text before or after the JSON.
+Use double quotes.
+Do not use trailing commas.
+
 {
   "final_status": "READY_FOR_ADMIN_REVIEW" | "REPROCESS_REQUIRED" | "MANUAL_REVIEW_REQUIRED" | "BLOCKED",
   "overall_score": number (0–100),

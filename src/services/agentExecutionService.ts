@@ -256,9 +256,9 @@ export async function runAgent(
     throw new Error(`Unknown agent: ${agentId}`);
   }
 
-  const maxRetries  = options.maxRetries   ?? 3;
-  const retryDelay  = options.retryDelayMs ?? 1500;
-  const timeoutMs   = options.timeoutMs    ?? 30_000;
+  const maxRetries  = options.maxRetries   ?? 2;
+  const retryDelay  = options.retryDelayMs ?? 2000;
+  const timeoutMs   = options.timeoutMs    ?? 120_000;
 
   const inputStr = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
   const inputSummary = inputStr.length > 200

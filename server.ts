@@ -902,49 +902,115 @@ app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
     const seoInput = { title: normOut.title, organization: normOut.organization,
       total_vacancies: normOut.total_vacancies, application_end: normOut.application_end,
       category: classifyOut.category };
-    const seoResult = await runAgent('SEO', seoInput);
+    const seoResult = await runAgent('SEO', seoInput, { maxRetries: 2, timeoutMs: 120_000 });
     const seoOut = (seoResult.output ?? {}) as any;
     createdLogs.push(toLog(seoResult, normOut.title));
 
+    // CRITICAL: If SEO fails, stop pipeline — do NOT execute VERIFICATION or QA
     if (seoResult.status === 'FAILED') {
-      console.warn('[Pipeline] SEO failed, continuing with default SEO values');
+      console.error('[Pipeline] SEO failed — STOPPING PIPELINE (cannot proceed to VERIFICATION, QC, FINAL_QA)');
+      for (const log of createdLogs) {
+        AgentLogRepository.create(log);
+      }
+      return res.status(500).json({
+        success: false,
+        message: 'SEO generation failed. Pipeline stopped.',
+        stage: 'SEO',
+        logs: createdLogs,
+      });
     }
 
     // ── Stage 9: VERIFICATION (Hard Gate) ───────────────────────────────────
-    const verifyInput = { source_text: textContent, extracted_data: normOut };
-    const verifyResult = await runAgent('VERIFICATION', verifyInput);
+    // Send ONLY the fields needed for verification, not full history
+    const verifyInput = { 
+      source_text: textContent.slice(0, 5000),
+      title: normOut.title,
+      organization: normOut.organization,
+      total_vacancies: normOut.total_vacancies,
+      qualification: normOut.qualification,
+      age_min: normOut.age_min,
+      age_max: normOut.age_max,
+      application_start: normOut.application_start,
+      application_end: normOut.application_end,
+      official_website_url: normOut.official_website_url,
+      advertisement_number: normOut.advertisement_number
+    };
+    const verifyResult = await runAgent('VERIFICATION', verifyInput, { maxRetries: 2, timeoutMs: 120_000 });
     const verifyOut = (verifyResult.output ?? { verification_status: 'FAILED' }) as any;
     createdLogs.push(toLog(verifyResult, normOut.title));
 
-    if (verifyResult.status === 'FAILED') {
-      console.error('[Pipeline] VERIFICATION failed — hard gate applies');
-    }
-
     const isVerificationPassed = verifyOut.verification_status === 'PASSED';
 
+    // CRITICAL: If VERIFICATION fails, stop pipeline — do NOT execute QC or FINAL_QA
+    if (verifyResult.status === 'FAILED' || !isVerificationPassed) {
+      console.error('[Pipeline] VERIFICATION failed — STOPPING PIPELINE (hard gate applies)');
+      for (const log of createdLogs) {
+        AgentLogRepository.create(log);
+      }
+      return res.status(422).json({
+        success: false,
+        message: `Verification failed: ${verifyOut.critical_errors?.[0] || 'Data verification did not pass'}`,
+        stage: 'VERIFICATION',
+        verification_status: verifyOut.verification_status,
+        logs: createdLogs,
+      });
+    }
+
     // ── Stage 10: QUALITY CONTROL ────────────────────────────────────────────
-    const qualityInput = { ...normOut, content: contentOut, seo: seoOut, verification: verifyOut };
-    const qualityResult = await runAgent('QUALITY_CONTROL', qualityInput);
+    // Send ONLY the fields needed for QC, not full history
+    const qualityInput = { 
+      title: normOut.title,
+      organization: normOut.organization,
+      total_vacancies: normOut.total_vacancies,
+      qualification: normOut.qualification,
+      age_min: normOut.age_min,
+      age_max: normOut.age_max,
+      application_start: normOut.application_start,
+      application_end: normOut.application_end,
+      content: contentOut,
+      seo: seoOut,
+      verification: verifyOut 
+    };
+    const qualityResult = await runAgent('QUALITY_CONTROL', qualityInput, { maxRetries: 2, timeoutMs: 120_000 });
     const qualityOut = (qualityResult.output ?? { quality_status: 'PENDING', total_score: 50 }) as any;
     createdLogs.push(toLog(qualityResult, normOut.title));
 
-    if (qualityResult.status === 'FAILED') {
-      console.warn('[Pipeline] QUALITY_CONTROL failed');
+    // CRITICAL: If QUALITY_CONTROL fails, stop pipeline — do NOT execute FINAL_QA
+    if (qualityResult.status === 'FAILED' || (qualityOut.total_score ?? 50) < 70) {
+      console.error('[Pipeline] QUALITY_CONTROL failed/low score — STOPPING PIPELINE');
+      for (const log of createdLogs) {
+        AgentLogRepository.create(log);
+      }
+      return res.status(422).json({
+        success: false,
+        message: `Quality control failed (score: ${qualityOut.total_score}). Issues: ${(qualityOut.issues ?? []).join(', ')}`,
+        stage: 'QUALITY_CONTROL',
+        quality_score: qualityOut.total_score,
+        logs: createdLogs,
+      });
     }
 
     // ── Stage 11: FINAL QA (AI pass) ─────────────────────────────────────────
+    // Send ONLY the fields needed for final QA, not full history
     const qaInput = {
-      draft_data: normOut, content: contentOut, seo: seoOut,
-      verification: verifyOut, quality: qualityOut,
+      title: normOut.title,
+      organization: normOut.organization,
+      total_vacancies: normOut.total_vacancies,
+      qualification: normOut.qualification,
+      age_min: normOut.age_min,
+      age_max: normOut.age_max,
+      application_start: normOut.application_start,
+      application_end: normOut.application_end,
+      official_website_url: normOut.official_website_url,
+      content: contentOut,
+      seo: seoOut,
+      verification: verifyOut,
+      quality: qualityOut,
       agent_results: createdLogs.map((l) => ({ agent: l.agentType, status: l.status })),
     };
-    const qaResult = await runAgent('FINAL_QA', qaInput);
+    const qaResult = await runAgent('FINAL_QA', qaInput, { maxRetries: 2, timeoutMs: 120_000 });
     const qaOut = (qaResult.output ?? { final_status: 'MANUAL_REVIEW_REQUIRED' }) as any;
     createdLogs.push(toLog(qaResult, normOut.title));
-
-    if (qaResult.status === 'FAILED') {
-      console.warn('[Pipeline] FINAL_QA failed');
-    }
 
     // ── Assemble Draft ───────────────────────────────────────────────────────
     const draftTitle   = normOut.title       || 'Government Recruitment 2026';
