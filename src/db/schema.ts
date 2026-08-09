@@ -344,11 +344,11 @@ CREATE TABLE IF NOT EXISTS pipeline_sessions (
   failure_reason TEXT,
   admin_review_notes TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  
-  INDEX idx_pipeline_sessions_status (current_status),
-  INDEX idx_pipeline_sessions_created_at (created_at)
+  updated_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_sessions_status ON pipeline_sessions(current_status);
+CREATE INDEX IF NOT EXISTS idx_pipeline_sessions_created_at ON pipeline_sessions(created_at);
 `;
 
 /**
@@ -368,11 +368,11 @@ CREATE TABLE IF NOT EXISTS agent_checkpoints (
   failure_reason TEXT,
   admin_notes TEXT,
   duration_ms INTEGER,
-  executed_at TEXT NOT NULL,
-  
-  INDEX idx_agent_checkpoints_session (pipeline_session_id),
-  INDEX idx_agent_checkpoints_status (status)
+  executed_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_session ON agent_checkpoints(pipeline_session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_status ON agent_checkpoints(status);
 `;
 
 /**
