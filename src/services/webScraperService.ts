@@ -226,17 +226,22 @@ export class SarkariResultScraper {
     const jobs: ScrapedJobData[] = [];
 
     try {
-      console.log('[Scraper] Starting job scrape from sarkariresult.com');
+      console.log('[Scraper] ▶ Starting job scrape from sarkariresult.com');
+      console.log(`[Scraper] Target URL: ${this.config.targetUrl}`);
+      console.log(`[Scraper] Timeout: ${this.config.timeout}ms, Retries: ${this.config.retryAttempts}`);
 
       // Fetch main page
       const html = await this.fetchWithRetry(this.config.targetUrl);
+      console.log(`[Scraper] ✓ Fetched main page (${html.length} bytes)`);
+      
       const $ = cheerio.load(html);
 
       // Parse job postings
+      console.log('[Scraper] Parsing job postings...');
       const parsedJobs = this.parseJobPostings($, html);
       jobs.push(...parsedJobs);
 
-      console.log(`[Scraper] Successfully scraped ${jobs.length} job postings`);
+      console.log(`[Scraper] ✓ Parsed ${jobs.length} job postings from main page`);
 
       // Scrape additional category pages (optional, for more comprehensive data)
       const categoryUrls = [
@@ -245,16 +250,18 @@ export class SarkariResultScraper {
         'https://www.sarkariresult.com/p/railway.html'
       ];
 
-      for (const categoryUrl of categoryUrls) {
+      for (let catIdx = 0; catIdx < categoryUrls.length; catIdx++) {
+        const categoryUrl = categoryUrls[catIdx];
         try {
+          console.log(`[Scraper] [${catIdx + 1}/${categoryUrls.length}] Scraping category: ${categoryUrl}`);
           const categoryHtml = await this.fetchWithRetry(categoryUrl);
           const $category = cheerio.load(categoryHtml);
           const categoryJobs = this.parseJobPostings($category, categoryHtml);
           jobs.push(...categoryJobs);
-          console.log(`[Scraper] Scraped ${categoryJobs.length} jobs from ${categoryUrl}`);
+          console.log(`[Scraper] [${catIdx + 1}] ✓ Scraped ${categoryJobs.length} jobs`);
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
-          console.warn(`[Scraper] Failed to scrape category: ${errorMsg}`);
+          console.warn(`[Scraper] [${catIdx + 1}] ⚠ Failed to scrape category: ${errorMsg}`);
           errors.push(`Category scrape failed: ${errorMsg}`);
         }
       }
@@ -263,6 +270,9 @@ export class SarkariResultScraper {
       const uniqueJobs = jobs.filter((job, index, self) => 
         self.findIndex(j => j.postUrl === job.postUrl) === index
       );
+
+      console.log(`[Scraper] ✓ Total jobs found: ${jobs.length}, Unique: ${uniqueJobs.length}`);
+      console.log(`[Scraper] ✓ Scrape completed in ${Date.now() - startTime}ms`);
 
       return {
         success: true,
@@ -276,7 +286,8 @@ export class SarkariResultScraper {
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error('[Scraper] Scraping failed:', errorMsg);
+      console.error('[Scraper] ✗ Scraping failed:', errorMsg);
+      console.error('[Scraper] Stack:', error instanceof Error ? error.stack : 'no stack');
 
       return {
         success: false,

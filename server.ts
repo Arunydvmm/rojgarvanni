@@ -40,6 +40,7 @@ import {
 
 // ── WEB SCRAPER IMPORTS ──────────────────────────────────────────────────────
 import { scraperScheduler } from './src/services/scraperScheduler.js';
+import { sarkariResultScraper } from './src/services/webScraperService.js';
 
 // ── DATABASE IMPORTS ─────────────────────────────────────────────────────────
 import {
@@ -1690,8 +1691,19 @@ app.post('/api/admin/scraper/run', requireDatabase, async (req, res) => {
   try {
     console.log('[Scraper API] Manual scraper run requested by admin');
     const result = await scraperScheduler.runManually();
-    logAudit('SCRAPER_MANUAL_RUN', `Admin triggered manual scraper run: ${result.jobsProcessed} jobs processed`);
-    res.json({ success: true, data: result });
+    
+    if (!result.success) {
+      console.error('[Scraper API] Manual scraper run failed:', result.error);
+      logAudit('SCRAPER_MANUAL_RUN_FAILED', `Manual scraper run failed: ${result.error}`);
+      return res.status(500).json({ success: false, message: result.error });
+    }
+
+    logAudit('SCRAPER_MANUAL_RUN', `Admin triggered manual scraper run: ${result.result?.jobsProcessed} jobs processed`);
+    res.json({ 
+      success: true, 
+      message: `Scraper completed: ${result.result?.jobsFound} jobs found, ${result.result?.jobsProcessed} jobs processed`,
+      data: result.result 
+    });
   } catch (error) {
     console.error('[Scraper API] Manual scraper run failed:', error);
     logAudit('SCRAPER_MANUAL_RUN_FAILED', `Admin manual scraper run failed: ${error}`);
@@ -1737,4 +1749,52 @@ app.post('/api/admin/scraper/reset-stats', requireDatabase, (req, res) => {
   }
 });
 
+// GET /api/admin/scraper/test — Test scraper without database save (debug only)
+app.get('/api/admin/scraper/test', requireDatabase, async (req, res) => {
+  try {
+    console.log('[Scraper API] Test scraper run (fetch only, no save)');
+    const result = await sarkariResultScraper.scrapeJobs();
+    
+    res.json({ 
+      success: result.success, 
+      message: `Scraper test completed: ${result.jobsFound} jobs found`,
+      data: {
+        ...result,
+        jobs: result.jobs.slice(0, 3) // Return only first 3 for preview
+      }
+    });
+  } catch (error) {
+    console.error('[Scraper API] Test scraper run failed:', error);
+    res.status(500).json({ success: false, message: String(error) });
+  }
+});
+
+// GET /api/admin/scraper/drafts — Get all draft jobs created by scraper
+app.get('/api/admin/scraper/drafts', requireDatabase, (req, res) => {
+  try {
+    const drafts = DraftRepository.findAll({ limit: 20, offset: 0 });
+    
+    // Filter to show only recently created scraper drafts (from last hour)
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const scraperDrafts = drafts.filter(d => 
+      d.sourceInfo?.name === 'SarkariResult.com' || 
+      (d.createdAt && d.createdAt > oneHourAgo)
+    );
+
+    res.json({ 
+      success: true, 
+      message: `Found ${scraperDrafts.length} scraper drafts`,
+      data: { 
+        totalDrafts: drafts.length,
+        scraperDrafts: scraperDrafts.length,
+        drafts: scraperDrafts.slice(0, 10)
+      }
+    });
+  } catch (error) {
+    console.error('[Scraper API] Failed to fetch drafts:', error);
+    res.status(500).json({ success: false, message: String(error) });
+  }
+});
+
 startServer();
+

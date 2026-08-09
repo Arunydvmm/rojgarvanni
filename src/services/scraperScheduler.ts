@@ -238,34 +238,45 @@ export class ScraperScheduler {
       return;
     }
 
-    console.log(`[Scheduler] Processing ${result.jobs.length} scraped jobs...`);
+    console.log(`[Scheduler] ▶ Processing ${result.jobs.length} scraped jobs...`);
 
     let createdCount = 0;
     let skippedCount = 0;
     const errors: string[] = [];
 
-    for (const scrapedJob of result.jobs) {
+    for (let idx = 0; idx < result.jobs.length; idx++) {
+      const scrapedJob = result.jobs[idx];
+      console.log(`[Scheduler] [${idx + 1}/${result.jobs.length}] Processing: "${scrapedJob.title.substring(0, 40)}..."`);
+
       try {
         // Check if job already exists (by URL and organization)
         const existingJob = await this.checkJobExists(scrapedJob);
         
         if (existingJob) {
+          console.log(`[Scheduler] [${idx + 1}] ⊘ Skipped (duplicate)`);
           skippedCount++;
           continue;
         }
 
         // Convert scraped data to draft
+        console.log(`[Scheduler] [${idx + 1}] Converting to draft...`);
         const draft = sarkariResultScraper.convertToDraft(scrapedJob);
+        console.log(`[Scheduler] [${idx + 1}] Draft ID: ${draft.id}`);
+        console.log(`[Scheduler] [${idx + 1}] Draft has ${Object.keys(draft).length} fields`);
 
         // Save draft to database
         try {
+          console.log(`[Scheduler] [${idx + 1}] Saving draft to database...`);
           DraftRepository.create(draft);
           createdCount++;
-          console.log(`[Scheduler] ✓ Created draft: ${draft.title.substring(0, 50)}...`);
+          console.log(`[Scheduler] [${idx + 1}] ✓ Created draft: ${draft.title.substring(0, 50)}...`);
         } catch (dbError) {
           const errorMsg = dbError instanceof Error ? dbError.message : String(dbError);
-          console.warn(`[Scheduler] Failed to save draft: ${errorMsg}`);
+          console.error(`[Scheduler] [${idx + 1}] ✗ Failed to save draft: ${errorMsg}`);
+          console.error(`[Scheduler] [${idx + 1}] Stack:`, dbError instanceof Error ? dbError.stack : 'no stack');
           skippedCount++;
+          errors.push(`Job ${idx + 1}: ${errorMsg}`);
+          continue;
         }
 
         // Create agent log entry
@@ -284,14 +295,16 @@ export class ScraperScheduler {
 
         try {
           AgentLogRepository.create(agentLog);
+          console.log(`[Scheduler] [${idx + 1}] ✓ Logged agent execution`);
         } catch (logError) {
-          console.warn('[Scheduler] Failed to create agent log:', logError);
+          console.warn(`[Scheduler] [${idx + 1}] ⚠ Failed to create agent log:`, logError);
         }
 
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error(`[Scheduler] Error processing job: ${errorMsg}`);
-        errors.push(errorMsg);
+        console.error(`[Scheduler] [${idx + 1}] ✗ Error processing job: ${errorMsg}`);
+        console.error(`[Scheduler] [${idx + 1}] Stack:`, error instanceof Error ? error.stack : 'no stack');
+        errors.push(`Job ${idx + 1}: ${errorMsg}`);
       }
     }
 
@@ -355,9 +368,32 @@ export class ScraperScheduler {
   /**
    * Manual trigger for scraper (for testing/debugging)
    */
-  async runManually(): Promise<ScraperResult> {
-    console.log('[Scheduler] Manual scraper run initiated');
-    return sarkariResultScraper.scrapeJobs();
+  async runManually(): Promise<{ success: boolean; result?: ScraperResult; error?: string }> {
+    console.log('[Scheduler] ▶ Manual scraper run initiated');
+    this.isProcessing = true;
+    const startTime = Date.now();
+
+    try {
+      if (!isDatabaseAvailable()) {
+        throw new Error('Database is not available - cannot process scraped data');
+      }
+
+      // Run scraper
+      const result = await this.runScraperWithRetry();
+      console.log(`[Scheduler] ✓ Scrape completed in ${Date.now() - startTime}ms: ${result.jobsFound} jobs found`);
+
+      // Process results (save to database)
+      await this.processScraperResults(result);
+
+      console.log(`[Scheduler] ✓ Manual run completed in ${Date.now() - startTime}ms`);
+      return { success: true, result };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[Scheduler] ✗ Manual run failed: ${errorMsg}`);
+      return { success: false, error: errorMsg };
+    } finally {
+      this.isProcessing = false;
+    }
   }
 
   /**
