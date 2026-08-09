@@ -16,18 +16,6 @@ import {
   NvidiaConfigError,
 } from './src/services/nvidiaAIService.js';
 import {
-  INITIAL_JOBS,
-  INITIAL_RESULTS,
-  INITIAL_ADMIT_CARDS,
-  INITIAL_ANSWER_KEYS,
-  INITIAL_SOURCES,
-  INITIAL_DRAFTS,
-  INITIAL_AGENT_LOGS,
-  INITIAL_SITE_SETTINGS,
-  INITIAL_ADS,
-  INITIAL_AUDIT_LOGS,
-} from './src/data/mockDatabase';
-import {
   GovtJob,
   ExamResult,
   AdmitCard,
@@ -50,23 +38,27 @@ import {
   QACheckResult,
 } from './src/types';
 
+// ── DATABASE IMPORTS ─────────────────────────────────────────────────────────
+import {
+  initializeDatabase,
+  isDatabaseAvailable,
+  checkDatabaseHealth,
+  setupShutdownHandlers,
+} from './src/db/database.js';
+import {
+  JobRepository,
+  DraftRepository,
+  AgentLogRepository,
+  AuditLogRepository,
+  SourceRepository,
+  SettingsRepository,
+} from './src/db/repositories/index.js';
+
 const app = express();
 const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
-
-// In-Memory Database State
-let jobsDb: GovtJob[] = [...INITIAL_JOBS];
-let resultsDb: ExamResult[] = [...INITIAL_RESULTS];
-let admitCardsDb: AdmitCard[] = [...INITIAL_ADMIT_CARDS];
-let answerKeysDb: AnswerKey[] = [...INITIAL_ANSWER_KEYS];
-let sourcesDb: SourceRegistry[] = [...INITIAL_SOURCES];
-let draftsDb: GovtJobDraft[] = [...INITIAL_DRAFTS];
-let agentLogsDb: AgentLog[] = [...INITIAL_AGENT_LOGS];
-let siteSettingsDb: SiteSettings = { ...INITIAL_SITE_SETTINGS };
-let adsDb: AdCampaign[] = [...INITIAL_ADS];
-let auditLogsDb: AuditLog[] = [...INITIAL_AUDIT_LOGS];
 
 // Legacy Gemini client — kept as fallback; primary model is NVIDIA Nemotron Nano 9B
 function getGeminiClient(): GoogleGenAI | null {
@@ -77,23 +69,50 @@ function getGeminiClient(): GoogleGenAI | null {
 
 // Helper to log audit actions
 function logAudit(action: string, details: string, adminUser = 'Administrator') {
-  const newLog: AuditLog = {
-    id: `aud-${Date.now()}`,
-    adminUser,
-    action,
-    details,
-    ipAddress: '127.0.0.1',
-    timestamp: new Date().toISOString(),
-  };
-  auditLogsDb.unshift(newLog);
+  if (!isDatabaseAvailable()) {
+    console.warn('[Audit] Database unavailable, audit log not persisted:', action);
+    return;
+  }
+
+  try {
+    const newLog: AuditLog = {
+      id: `aud-${Date.now()}`,
+      adminUser,
+      action,
+      details,
+      ipAddress: '127.0.0.1',
+      timestamp: new Date().toISOString(),
+    };
+    AuditLogRepository.create(newLog);
+  } catch (error) {
+    console.error('[Audit] Failed to create audit log:', error);
+  }
+}
+
+// ── DATABASE GUARD MIDDLEWARE ────────────────────────────────────────────────
+// Middleware to block write/AI operations if database is unavailable
+function requireDatabase(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database unavailable. Cannot process this request.',
+      error: 'SERVICE_UNAVAILABLE',
+    });
+  }
+  next();
 }
 
 // --- PUBLIC API ROUTES ---
 
 // GET /api/jobs
 app.get('/api/jobs', (req, res) => {
-  const { category, qualification, status, search, limit } = req.query;
-  let filtered = jobsDb.filter((j) => !j.isDraft);
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const { category, qualification, status, search, limit } = req.query;
+    let filtered = JobRepository.findAll({ isDraft: false });
 
   if (category && typeof category === 'string' && category !== 'All') {
     filtered = filtered.filter((j) => j.category.toLowerCase() === category.toLowerCase());
@@ -121,15 +140,28 @@ app.get('/api/jobs', (req, res) => {
   }
 
   res.json({ success: true, count: filtered.length, data: filtered });
+  } catch (error) {
+    console.error('[API] Error in /api/jobs:', error);
+    res.status(500).json({ success: false, message: 'Database query failed' });
+  }
 });
 
 // GET /api/jobs/:slug
 app.get('/api/jobs/:slug', (req, res) => {
-  const job = jobsDb.find((j) => j.slug === req.params.slug || j.id === req.params.slug);
-  if (!job) {
-    return res.status(404).json({ success: false, message: 'Government Job notification not found' });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
-  res.json({ success: true, data: job });
+
+  try {
+    const job = JobRepository.findBySlug(req.params.slug) || JobRepository.findById(req.params.slug);
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'Government Job notification not found' });
+    }
+    res.json({ success: true, data: job });
+  } catch (error) {
+    console.error('[API] Error in /api/jobs/:slug:', error);
+    res.status(500).json({ success: false, message: 'Database query failed' });
+  }
 });
 
 // GET /api/results
@@ -224,70 +256,80 @@ app.get('/api/answer-keys/:slug', (req, res) => {
 
 // GET /api/search (Unified search across jobs, results, admit cards, answer keys)
 app.get('/api/search', (req, res) => {
-  const query = typeof req.query.q === 'string' ? req.query.q.toLowerCase().trim() : '';
-  if (!query) {
-    return res.json({
-      success: true,
-      data: { jobs: [], results: [], admitCards: [], answerKeys: [] },
-    });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
-  const matchedJobs = jobsDb.filter(
-    (j) =>
-      !j.isDraft &&
-      (j.title.toLowerCase().includes(query) ||
+  try {
+    const query = typeof req.query.q === 'string' ? req.query.q.toLowerCase().trim() : '';
+    if (!query) {
+      return res.json({
+        success: true,
+        data: { jobs: [], results: [], admitCards: [], answerKeys: [] },
+      });
+    }
+
+    const matchedJobs = JobRepository.findAll({ isDraft: false }).filter(
+      (j) =>
+        j.title.toLowerCase().includes(query) ||
         j.organization.toLowerCase().includes(query) ||
         j.category.toLowerCase().includes(query) ||
-        j.qualification.toLowerCase().includes(query))
-  );
+        j.qualification.toLowerCase().includes(query)
+    );
 
-  const matchedResults = resultsDb.filter(
-    (r) =>
-      !r.isDraft &&
-      (r.title.toLowerCase().includes(query) ||
-        r.organization.toLowerCase().includes(query) ||
-        r.examName.toLowerCase().includes(query))
-  );
+    // TODO: Add other search results when repositories are ready
+    const matchedResults: any[] = [];
+    const matchedAdmitCards: any[] = [];
+    const matchedAnswerKeys: any[] = [];
 
-  const matchedAdmitCards = admitCardsDb.filter(
-    (a) =>
-      !a.isDraft &&
-      (a.title.toLowerCase().includes(query) ||
-        a.organization.toLowerCase().includes(query) ||
-        a.examName.toLowerCase().includes(query))
-  );
-
-  const matchedAnswerKeys = answerKeysDb.filter(
-    (ak) =>
-      !ak.isDraft &&
-      (ak.title.toLowerCase().includes(query) ||
-        ak.organization.toLowerCase().includes(query) ||
-        ak.examName.toLowerCase().includes(query))
-  );
-
-  res.json({
-    success: true,
-    data: {
-      jobs: matchedJobs,
-      results: matchedResults,
-      admitCards: matchedAdmitCards,
-      answerKeys: matchedAnswerKeys,
-    },
-  });
+    res.json({
+      success: true,
+      data: {
+        jobs: matchedJobs,
+        results: matchedResults,
+        admitCards: matchedAdmitCards,
+        answerKeys: matchedAnswerKeys,
+      },
+    });
+  } catch (error) {
+    console.error('[API] Error in search:', error);
+    res.status(500).json({ success: false, message: 'Search failed' });
+  }
 });
 
 // GET /api/site-settings (Public settings, e.g. whether ads are enabled)
 app.get('/api/site-settings', (req, res) => {
-  res.json({ success: true, data: siteSettingsDb, ads: siteSettingsDb.adsEnabled ? adsDb : [] });
+  if (!isDatabaseAvailable()) {
+    // Return basic settings if database is unavailable
+    return res.json({
+      success: true,
+      data: {
+        adsEnabled: false,
+        siteTitle: 'RozgarVaani - India Government Jobs',
+        contactEmail: 'contact@rozgarvaani.in',
+        maintenanceMode: false,
+        autoScanIntervalMinutes: 30,
+      },
+      ads: []
+    });
+  }
+
+  try {
+    const settings = SettingsRepository.get();
+    res.json({ success: true, data: settings, ads: settings.adsEnabled ? [] : [] }); // TODO: Add ad campaigns
+  } catch (error) {
+    console.error('[API] Error fetching site settings:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch site settings' });
+  }
 });
 
 // --- ADMIN API ROUTES ---
 
 // POST /api/admin/login
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', requireDatabase, (req, res) => {
   const { password } = req.body;
-  // Default PIN / Password
-  if (password === 'admin123' || password === 'admin' || password === 'rozgar2026') {
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  if (password === adminPassword) {
     logAudit('ADMIN_LOGIN_SUCCESS', 'Admin user logged in successfully');
     return res.json({
       success: true,
@@ -301,206 +343,332 @@ app.post('/api/admin/login', (req, res) => {
 
 // GET /api/admin/dashboard-stats
 app.get('/api/admin/dashboard-stats', (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      totalJobs: jobsDb.length,
-      activeJobs: jobsDb.filter((j) => j.status === 'ACTIVE' || j.status === 'NEW').length,
-      totalResults: resultsDb.length,
-      totalAdmitCards: admitCardsDb.length,
-      totalAnswerKeys: answerKeysDb.length,
-      totalDrafts: draftsDb.length,
-      failedVerifications: draftsDb.filter((d) => d.verificationReport.verificationStatus === 'FAILED').length,
-      activeSources: sourcesDb.filter((s) => s.status === 'ACTIVE').length,
-      totalAgentRuns: agentLogsDb.length,
-      adsEnabled: siteSettingsDb.adsEnabled,
-    },
-  });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const totalJobs = JobRepository.count();
+    const activeJobs = JobRepository.count({ status: 'ACTIVE' }) + JobRepository.count({ status: 'NEW' });
+    const totalDrafts = DraftRepository.count();
+    const failedDrafts = DraftRepository.findAll({ verificationStatus: 'FAILED' }).length;
+    const activeSources = SourceRepository.count({ status: 'ACTIVE' });
+    const totalAgentRuns = AgentLogRepository.count();
+    const settings = SettingsRepository.get();
+
+    res.json({
+      success: true,
+      data: {
+        totalJobs,
+        activeJobs,
+        totalResults: 0, // TODO: Add ExamResultRepository
+        totalAdmitCards: 0, // TODO: Add AdmitCardRepository  
+        totalAnswerKeys: 0, // TODO: Add AnswerKeyRepository
+        totalDrafts,
+        failedVerifications: failedDrafts,
+        activeSources,
+        totalAgentRuns,
+        adsEnabled: settings.adsEnabled,
+      },
+    });
+  } catch (error) {
+    console.error('[API] Error in dashboard stats:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch dashboard stats' });
+  }
 });
 
 // GET /api/admin/drafts
 app.get('/api/admin/drafts', (req, res) => {
-  res.json({ success: true, data: draftsDb });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const drafts = DraftRepository.findAll();
+    res.json({ success: true, data: drafts });
+  } catch (error) {
+    console.error('[API] Error fetching drafts:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch drafts' });
+  }
 });
 
 // POST /api/admin/drafts/:id/approve
-app.post('/api/admin/drafts/:id/approve', (req, res) => {
-  const draftIndex = draftsDb.findIndex((d) => d.id === req.params.id);
-  if (draftIndex === -1) {
-    return res.status(404).json({ success: false, message: 'Draft not found' });
+app.post('/api/admin/drafts/:id/approve', requireDatabase, (req, res) => {
+  try {
+    const draft = DraftRepository.findById(req.params.id);
+    if (!draft) {
+      return res.status(404).json({ success: false, message: 'Draft not found' });
+    }
+
+    // Hard gate check
+    if (draft.verificationReport.verificationStatus === 'FAILED') {
+      return res.status(400).json({
+        success: false,
+        message: 'HARD GATE FAILURE: Cannot publish draft with failed verification report without resolving critical errors.',
+      });
+    }
+
+    // Convert draft to published GovtJob
+    const publishedJob: GovtJob = {
+      ...draft,
+      isDraft: false,
+      status: 'NEW',
+      publishedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    JobRepository.create(publishedJob);
+    DraftRepository.delete(draft.id);
+
+    logAudit('APPROVE_AND_PUBLISH_DRAFT', `Approved draft: ${publishedJob.title}`);
+    res.json({ success: true, message: 'Draft approved and published to public portal', data: publishedJob });
+  } catch (error) {
+    console.error('[API] Error approving draft:', error);
+    res.status(500).json({ success: false, message: 'Failed to approve draft' });
   }
-
-  const draft = draftsDb[draftIndex];
-
-  // Hard gate check
-  if (draft.verificationReport.verificationStatus === 'FAILED') {
-    return res.status(400).json({
-      success: false,
-      message: 'HARD GATE FAILURE: Cannot publish draft with failed verification report without resolving critical errors.',
-    });
-  }
-
-  // Convert draft to published GovtJob
-  const publishedJob: GovtJob = {
-    ...draft,
-    isDraft: false,
-    status: 'NEW',
-    publishedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-
-  jobsDb.unshift(publishedJob);
-  draftsDb.splice(draftIndex, 1);
-
-  logAudit('APPROVE_AND_PUBLISH_DRAFT', `Approved draft: ${publishedJob.title}`);
-  res.json({ success: true, message: 'Draft approved and published to public portal', data: publishedJob });
 });
 
 // POST /api/admin/drafts/:id/reject
-app.post('/api/admin/drafts/:id/reject', (req, res) => {
-  const draftIndex = draftsDb.findIndex((d) => d.id === req.params.id);
-  if (draftIndex === -1) {
-    return res.status(404).json({ success: false, message: 'Draft not found' });
-  }
+app.post('/api/admin/drafts/:id/reject', requireDatabase, (req, res) => {
+  try {
+    const draft = DraftRepository.findById(req.params.id);
+    if (!draft) {
+      return res.status(404).json({ success: false, message: 'Draft not found' });
+    }
 
-  const removed = draftsDb.splice(draftIndex, 1)[0];
-  logAudit('REJECT_DRAFT', `Rejected and removed draft: ${removed.title}`);
-  res.json({ success: true, message: 'Draft rejected and removed' });
+    DraftRepository.delete(draft.id);
+    logAudit('REJECT_DRAFT', `Rejected and removed draft: ${draft.title}`);
+    res.json({ success: true, message: 'Draft rejected and removed' });
+  } catch (error) {
+    console.error('[API] Error rejecting draft:', error);
+    res.status(500).json({ success: false, message: 'Failed to reject draft' });
+  }
 });
 
 // POST /api/admin/jobs/manual (Create or edit job manually)
-app.post('/api/admin/jobs/manual', (req, res) => {
+app.post('/api/admin/jobs/manual', requireDatabase, (req, res) => {
   const jobData = req.body;
   if (!jobData.title || !jobData.organization) {
     return res.status(400).json({ success: false, message: 'Title and Organization are required' });
   }
 
-  const newJob: GovtJob = {
-    id: jobData.id || `job-man-${Date.now()}`,
-    slug: jobData.slug || jobData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-    title: jobData.title,
-    organization: jobData.organization,
-    department: jobData.department || 'Government Department',
-    advertisementNumber: jobData.advertisementNumber || 'MANUAL-2026',
-    category: jobData.category || 'Central Government',
-    state: jobData.state || 'All India',
-    postNames: jobData.postNames || [jobData.title],
-    totalVacancies: Number(jobData.totalVacancies) || 0,
-    categoryWiseVacancies: jobData.categoryWiseVacancies || { ur: 0, obc: 0, sc: 0, st: 0, ews: 0 },
-    qualification: jobData.qualification || 'Graduation',
-    qualificationDetails: jobData.qualificationDetails || 'As per official advertisement.',
-    ageMin: Number(jobData.ageMin) || 18,
-    ageMax: Number(jobData.ageMax) || 35,
-    ageRelaxation: jobData.ageRelaxation || 'As per government rules',
-    applicationStart: jobData.applicationStart || new Date().toISOString().split('T')[0],
-    applicationEnd: jobData.applicationEnd || '2026-09-30',
-    feePaymentDeadline: jobData.feePaymentDeadline || '2026-09-30',
-    examDate: jobData.examDate || 'To be announced',
-    applicationFee: jobData.applicationFee || { generalObc: '₹100', scSt: '₹0', female: '₹0' },
-    salary: jobData.salary || { payLevel: 'Level 6', payScale: '₹35,400 - ₹1,12,400', basicPay: '₹35,400' },
-    selectionProcess: jobData.selectionProcess || ['Written Exam', 'Document Verification'],
-    howToApply: jobData.howToApply || ['Visit official website', 'Fill online application', 'Pay fee', 'Submit'],
-    overview: jobData.overview || 'Government recruitment notification.',
-    status: jobData.status || 'NEW',
-    isClosingSoon: false,
-    links: jobData.links || {
-      applyUrl: 'https://example.gov.in',
-      notificationUrl: 'https://example.gov.in/notice.pdf',
-      officialWebsiteUrl: 'https://example.gov.in',
-    },
-    sourceInfo: {
-      name: 'Admin Manual Entry',
-      type: 'Direct Admin Creation',
-      lastVerified: new Date().toISOString().split('T')[0],
-      evidenceText: 'Created directly by portal administrator.',
-    },
-    verificationStatus: 'PASSED',
-    qualityStatus: 'PASSED',
-    isDraft: false,
-    publishedAt: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+  try {
+    const newJob: GovtJob = {
+      id: jobData.id || `job-man-${Date.now()}`,
+      slug: jobData.slug || jobData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      title: jobData.title,
+      organization: jobData.organization,
+      department: jobData.department || 'Government Department',
+      advertisementNumber: jobData.advertisementNumber || 'MANUAL-2026',
+      category: jobData.category || 'Central Government',
+      state: jobData.state || 'All India',
+      postNames: jobData.postNames || [jobData.title],
+      totalVacancies: Number(jobData.totalVacancies) || 0,
+      categoryWiseVacancies: jobData.categoryWiseVacancies || { ur: 0, obc: 0, sc: 0, st: 0, ews: 0 },
+      qualification: jobData.qualification || 'Graduation',
+      qualificationDetails: jobData.qualificationDetails || 'As per official advertisement.',
+      ageMin: Number(jobData.ageMin) || 18,
+      ageMax: Number(jobData.ageMax) || 35,
+      ageRelaxation: jobData.ageRelaxation || 'As per government rules',
+      applicationStart: jobData.applicationStart || new Date().toISOString().split('T')[0],
+      applicationEnd: jobData.applicationEnd || '2026-09-30',
+      feePaymentDeadline: jobData.feePaymentDeadline || '2026-09-30',
+      examDate: jobData.examDate || 'To be announced',
+      applicationFee: jobData.applicationFee || { generalObc: '₹100', scSt: '₹0', female: '₹0' },
+      salary: jobData.salary || { payLevel: 'Level 6', payScale: '₹35,400 - ₹1,12,400', basicPay: '₹35,400' },
+      selectionProcess: jobData.selectionProcess || ['Written Exam', 'Document Verification'],
+      howToApply: jobData.howToApply || ['Visit official website', 'Fill online application', 'Pay fee', 'Submit'],
+      overview: jobData.overview || 'Government recruitment notification.',
+      status: jobData.status || 'NEW',
+      isClosingSoon: false,
+      links: jobData.links || {
+        applyUrl: 'https://example.gov.in',
+        notificationUrl: 'https://example.gov.in/notice.pdf',
+        officialWebsiteUrl: 'https://example.gov.in',
+      },
+      sourceInfo: {
+        name: 'Admin Manual Entry',
+        type: 'Direct Admin Creation',
+        lastVerified: new Date().toISOString().split('T')[0],
+        evidenceText: 'Created directly by portal administrator.',
+      },
+      verificationStatus: 'PASSED',
+      qualityStatus: 'PASSED',
+      isDraft: false,
+      publishedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
 
-  const existingIdx = jobsDb.findIndex((j) => j.id === newJob.id);
-  if (existingIdx !== -1) {
-    jobsDb[existingIdx] = newJob;
-    logAudit('UPDATE_JOB_MANUAL', `Updated job: ${newJob.title}`);
-  } else {
-    jobsDb.unshift(newJob);
-    logAudit('CREATE_JOB_MANUAL', `Created new job manually: ${newJob.title}`);
+    const existing = JobRepository.findById(newJob.id);
+    if (existing) {
+      JobRepository.update(newJob.id, newJob);
+      logAudit('UPDATE_JOB_MANUAL', `Updated job: ${newJob.title}`);
+    } else {
+      JobRepository.create(newJob);
+      logAudit('CREATE_JOB_MANUAL', `Created new job manually: ${newJob.title}`);
+    }
+
+    res.json({ success: true, message: 'Job saved successfully', data: newJob });
+  } catch (error) {
+    console.error('[API] Error saving manual job:', error);
+    res.status(500).json({ success: false, message: 'Failed to save job' });
   }
-
-  res.json({ success: true, message: 'Job saved successfully', data: newJob });
 });
 
 // GET /api/admin/sources
 app.get('/api/admin/sources', (req, res) => {
-  res.json({ success: true, data: sourcesDb });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const sources = SourceRepository.findAll();
+    res.json({ success: true, data: sources });
+  } catch (error) {
+    console.error('[API] Error fetching sources:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch sources' });
+  }
 });
 
 // POST /api/admin/sources
-app.post('/api/admin/sources', (req, res) => {
+app.post('/api/admin/sources', requireDatabase, (req, res) => {
   const { name, url, type, crawlFrequency, permissionNotes } = req.body;
   if (!name || !url) {
     return res.status(400).json({ success: false, message: 'Source Name and URL are required' });
   }
 
-  const newSource: SourceRegistry = {
-    id: `src-${Date.now()}`,
-    name,
-    url,
-    type: type || 'GOVT_PORTAL',
-    status: 'ACTIVE',
-    crawlFrequency: crawlFrequency || 'EVERY_30_MIN',
-    lastScan: new Date().toISOString(),
-    lastSuccessfulScan: new Date().toISOString(),
-    permissionNotes: permissionNotes || 'Public government recruitment portal feed',
-    parserType: 'GENERIC_AI_SOURCE_PARSER',
-    jobsExtractedCount: 0,
-  };
+  try {
+    const newSource: SourceRegistry = {
+      id: `src-${Date.now()}`,
+      name,
+      url,
+      type: type || 'GOVT_PORTAL',
+      status: 'ACTIVE',
+      crawlFrequency: crawlFrequency || 'EVERY_30_MIN',
+      lastScan: new Date().toISOString(),
+      lastSuccessfulScan: new Date().toISOString(),
+      permissionNotes: permissionNotes || 'Public government recruitment portal feed',
+      parserType: 'GENERIC_AI_SOURCE_PARSER',
+      jobsExtractedCount: 0,
+    };
 
-  sourcesDb.unshift(newSource);
-  logAudit('ADD_SOURCE', `Added government source registry: ${name}`);
-  res.json({ success: true, message: 'Source added to registry', data: newSource });
+    SourceRepository.create(newSource);
+    logAudit('ADD_SOURCE', `Added government source registry: ${name}`);
+    res.json({ success: true, message: 'Source added to registry', data: newSource });
+  } catch (error) {
+    console.error('[API] Error creating source:', error);
+    res.status(500).json({ success: false, message: 'Failed to create source' });
+  }
 });
 
 // GET /api/admin/pipeline/logs
 app.get('/api/admin/pipeline/logs', (req, res) => {
-  res.json({ success: true, data: agentLogsDb });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const logs = AgentLogRepository.findAll({ limit: 1000 });
+    res.json({ success: true, data: logs });
+  } catch (error) {
+    console.error('[API] Error fetching agent logs:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch pipeline logs' });
+  }
 });
 
 // GET /api/admin/settings
 app.get('/api/admin/settings', (req, res) => {
-  res.json({ success: true, data: siteSettingsDb });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const settings = SettingsRepository.get();
+    res.json({ success: true, data: settings });
+  } catch (error) {
+    console.error('[API] Error fetching settings:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch settings' });
+  }
 });
 
 // POST /api/admin/settings
-app.post('/api/admin/settings', (req, res) => {
+app.post('/api/admin/settings', requireDatabase, (req, res) => {
   const { adsEnabled, siteTitle, contactEmail, maintenanceMode, autoScanIntervalMinutes } = req.body;
-  siteSettingsDb = {
-    ...siteSettingsDb,
-    adsEnabled: adsEnabled !== undefined ? Boolean(adsEnabled) : siteSettingsDb.adsEnabled,
-    siteTitle: siteTitle || siteSettingsDb.siteTitle,
-    contactEmail: contactEmail || siteSettingsDb.contactEmail,
-    maintenanceMode: maintenanceMode !== undefined ? Boolean(maintenanceMode) : siteSettingsDb.maintenanceMode,
-    autoScanIntervalMinutes: autoScanIntervalMinutes ? Number(autoScanIntervalMinutes) : siteSettingsDb.autoScanIntervalMinutes,
-  };
+  
+  try {
+    const updatedSettings = SettingsRepository.update({
+      adsEnabled: adsEnabled !== undefined ? Boolean(adsEnabled) : undefined,
+      siteTitle: siteTitle || undefined,
+      contactEmail: contactEmail || undefined,
+      maintenanceMode: maintenanceMode !== undefined ? Boolean(maintenanceMode) : undefined,
+      autoScanIntervalMinutes: autoScanIntervalMinutes ? Number(autoScanIntervalMinutes) : undefined,
+    });
 
-  logAudit('UPDATE_SETTINGS', `Updated site settings (Ads enabled: ${siteSettingsDb.adsEnabled})`);
-  res.json({ success: true, message: 'Settings saved', data: siteSettingsDb });
+    logAudit('UPDATE_SETTINGS', `Updated site settings (Ads enabled: ${updatedSettings.adsEnabled})`);
+    res.json({ success: true, message: 'Settings saved', data: updatedSettings });
+  } catch (error) {
+    console.error('[API] Error updating settings:', error);
+    res.status(500).json({ success: false, message: 'Failed to update settings' });
+  }
 });
 
 // GET /api/admin/audit-logs
 app.get('/api/admin/audit-logs', (req, res) => {
-  res.json({ success: true, data: auditLogsDb });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const logs = AuditLogRepository.findAll({ limit: 1000 });
+    res.json({ success: true, data: logs });
+  } catch (error) {
+    console.error('[API] Error fetching audit logs:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch audit logs' });
+  }
+});
+
+// ─── HEALTH CHECK ENDPOINT ──────────────────────────────────────────────────
+// GET /api/health
+app.get('/api/health', (req, res) => {
+  const dbHealth = checkDatabaseHealth();
+  const aiAvailable = Boolean(process.env.NVIDIA_API_KEY);
+  
+  const systemStatus = {
+    database: {
+      available: dbHealth.available,
+      responsive: dbHealth.responsive,
+      tableCount: dbHealth.tableCount,
+      schemaVersion: dbHealth.schemaVersion,
+      error: dbHealth.error,
+    },
+    ai: {
+      available: aiAvailable,
+      model: aiAvailable ? NVIDIA_MODEL_DISPLAY_NAME : 'Not configured',
+    },
+    server: {
+      status: 'running',
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+    }
+  };
+
+  const overallStatus = dbHealth.available && aiAvailable ? 'healthy' : 
+                       dbHealth.available ? 'limited' : 'degraded';
+
+  res.json({
+    success: true,
+    status: overallStatus,
+    timestamp: new Date().toISOString(),
+    data: systemStatus
+  });
 });
 
 // ─── NVIDIA MULTI-AGENT PIPELINE ─────────────────────────────────────────────
 // POST /api/admin/pipeline/run
 // Executes the full 12-stage NVIDIA Nemotron Nano 9B pipeline.
 // Gemini is no longer used here. One model, 12 agents, separate prompts.
-app.post('/api/admin/pipeline/run', async (req, res) => {
+app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
   const { rawText, sourceUrl } = req.body;
 
   const textContent =
@@ -548,7 +716,9 @@ app.post('/api/admin/pipeline/run', async (req, res) => {
     createdLogs.push(toLog(discoveryResult));
 
     if (discoveryResult.status === 'FAILED' || discoveryOut.is_recruitment_notification === false) {
-      agentLogsDb = [...createdLogs, ...agentLogsDb];
+      for (const log of createdLogs) {
+        AgentLogRepository.create(log);
+      }
       return res.status(422).json({
         success: false,
         message: discoveryOut.reason || 'Discovery agent: not a valid recruitment notification.',
@@ -567,7 +737,9 @@ app.post('/api/admin/pipeline/run', async (req, res) => {
     createdLogs.push(toLog(extractResult, extractOut.title));
 
     if (extractResult.status === 'FAILED') {
-      agentLogsDb = [...createdLogs, ...agentLogsDb];
+      for (const log of createdLogs) {
+        AgentLogRepository.create(log);
+      }
       return res.status(500).json({ success: false, message: 'Extraction agent failed.', stage: 'EXTRACTION' });
     }
 
@@ -577,18 +749,23 @@ app.post('/api/admin/pipeline/run', async (req, res) => {
     createdLogs.push(toLog(normResult, normOut.title));
 
     // ── Stage 5: DUPLICATE CHECK ─────────────────────────────────────────────
-    const existingTitles = [...jobsDb, ...draftsDb].map((j) => ({
+    const existingJobs = JobRepository.findAll({ limit: 20 });
+    const existingDrafts = DraftRepository.findAll({ limit: 20 });
+    const existingTitles = [...existingJobs, ...existingDrafts].map((j) => ({
       id: j.id, title: j.title, organization: j.organization,
-      advertisementNumber: (j as any).advertisementNumber,
-      applicationStart: (j as any).applicationStart,
-      applicationEnd: (j as any).applicationEnd,
+      advertisementNumber: j.advertisementNumber,
+      applicationStart: j.applicationStart,
+      applicationEnd: j.applicationEnd,
     }));
-    const dupResult = await runAgent('DUPLICATE', { incoming: normOut, existing_records: existingTitles.slice(0, 20) });
+    const dupResult = await runAgent('DUPLICATE', { incoming: normOut, existing_records: existingTitles });
     const dupOut = (dupResult.output ?? { status: 'NEW', recommendation: 'PROCEED' }) as any;
     createdLogs.push(toLog(dupResult, normOut.title));
 
     if (dupOut.recommendation === 'BLOCK') {
-      agentLogsDb = [...createdLogs, ...agentLogsDb];
+      // Save logs before early return
+      for (const log of createdLogs) {
+        AgentLogRepository.create(log);
+      }
       return res.status(409).json({
         success: false,
         message: `Duplicate detected: ${dupOut.match_reason}`,
@@ -725,8 +902,13 @@ app.post('/api/admin/pipeline/run', async (req, res) => {
       agentLogs: createdLogs,
     };
 
-    draftsDb.unshift(newDraft);
-    agentLogsDb = [...createdLogs, ...agentLogsDb];
+    DraftRepository.create(newDraft);
+    
+    // Save all agent logs
+    for (const log of createdLogs) {
+      AgentLogRepository.create(log);
+    }
+    
     logAudit('RUN_AI_PIPELINE', `NVIDIA Pipeline (${NVIDIA_MODEL_ID}) generated draft: ${newDraft.title}`);
 
     res.json({
@@ -744,7 +926,16 @@ app.post('/api/admin/pipeline/run', async (req, res) => {
 
   } catch (error: any) {
     console.error('[Pipeline] Error:', error.message);
-    agentLogsDb = [...createdLogs, ...agentLogsDb];
+    
+    // Save logs even on failure
+    for (const log of createdLogs) {
+      try {
+        AgentLogRepository.create(log);
+      } catch (logError) {
+        console.error('[Pipeline] Failed to save log:', logError);
+      }
+    }
+    
     // Never leak the API key in error responses
     const safeMessage = (error.message || 'Pipeline execution error').replace(/(Bearer\s+)\S+/gi, '$1[REDACTED]');
     res.status(500).json({ success: false, message: safeMessage });
@@ -753,6 +944,33 @@ app.post('/api/admin/pipeline/run', async (req, res) => {
 
 // Start Server and Vite setup
 async function startServer() {
+  console.log('🚀 RozgarVaani Government Job Portal - Starting up...');
+  
+  // ── DATABASE INITIALIZATION ─────────────────────────────────────────────
+  console.log('[Startup] Initializing database...');
+  const dbResult = initializeDatabase();
+  
+  if (!dbResult.success) {
+    console.error(`[Startup] ✗ Database initialization failed: ${dbResult.error}`);
+    console.error('[Startup] ✗ Starting in LIMITED MODE (read-only, no AI pipeline)');
+    
+    // In limited mode, we still start the server but guard all write operations
+    console.log('[Startup] ⚠️  AI Pipeline disabled - database required for content generation');
+  } else {
+    console.log('[Startup] ✓ Database ready and available');
+    
+    // Setup graceful shutdown handlers
+    setupShutdownHandlers();
+  }
+
+  // ── HEALTH CHECK ────────────────────────────────────────────────────────
+  const health = checkDatabaseHealth();
+  console.log(`[Startup] Database health: ${health.available ? '✓ Available' : '✗ Unavailable'}`);
+  if (health.available && health.tableCount) {
+    console.log(`[Startup] Database tables: ${health.tableCount}`);
+  }
+
+  // ── VITE/EXPRESS SETUP ──────────────────────────────────────────────────
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -768,7 +986,8 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`RozgarVaani Government Job Portal Server running on http://0.0.0.0:${PORT}`);
+    console.log(`✓ RozgarVaani Government Job Portal Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Database: ${isDatabaseAvailable() ? '✓ Available' : '✗ Limited Mode'}`);
   });
 }
 
@@ -776,14 +995,12 @@ async function startServer() {
 // POST /api/admin/drafts/:id/qa-check
 // Runs the complete 28-rule QA audit on a draft, auto-fixes safe issues,
 // and returns a strict QAFinalReport JSON.
-app.post('/api/admin/drafts/:id/qa-check', (req, res) => {
-  const draftIdx = draftsDb.findIndex((d) => d.id === req.params.id);
-  if (draftIdx === -1) {
-    return res.status(404).json({ success: false, message: 'Draft not found' });
-  }
-
-  // Work on a mutable copy — never mutate the original until a fix is confirmed
-  let draft = { ...draftsDb[draftIdx] };
+app.post('/api/admin/drafts/:id/qa-check', requireDatabase, (req, res) => {
+  try {
+    let draft = DraftRepository.findById(req.params.id);
+    if (!draft) {
+      return res.status(404).json({ success: false, message: 'Draft not found' });
+    }
 
   const autoFixes: QAAutoFix[] = [];
   const removedContent: QARemovedContent[] = [];
@@ -1070,7 +1287,9 @@ app.post('/api/admin/drafts/:id/qa-check', (req, res) => {
     const advNo = (draft.advertisementNumber ?? '').trim().toLowerCase();
     const org = (draft.organization ?? '').trim().toLowerCase();
     if (advNo) {
-      const exactDup = [...jobsDb, ...draftsDb].find(
+      const allJobs = JobRepository.findAll();
+      const allDrafts = DraftRepository.findAll();
+      const exactDup = [...allJobs, ...allDrafts].find(
         (j) =>
           j.id !== draft.id &&
           (j.advertisementNumber ?? '').trim().toLowerCase() === advNo &&
@@ -1262,6 +1481,10 @@ app.post('/api/admin/drafts/:id/qa-check', (req, res) => {
   };
 
   res.json({ success: true, data: report });
+  } catch (error) {
+    console.error('[QA] Error in QA check:', error);
+    res.status(500).json({ success: false, message: 'QA check failed' });
+  }
 });
 // ─── END FINAL QA AGENT ──────────────────────────────────────────────────────
 
@@ -1289,9 +1512,19 @@ app.get('/api/admin/nvidia/test', async (_req, res) => {
   });
 });
 
-// GET /api/admin/logs (alias for pipeline/logs used by AdminAuditLogs)
-app.get('/api/admin/logs', (_req, res) => {
-  res.json({ success: true, data: agentLogsDb });
+// GET /api/logs (alias for pipeline/logs used by AdminAuditLogs)
+app.get('/api/admin/logs', (req, res) => {
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
+  }
+
+  try {
+    const logs = AgentLogRepository.findAll({ limit: 1000 });
+    res.json({ success: true, data: logs });
+  } catch (error) {
+    console.error('[API] Error fetching logs:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch logs' });
+  }
 });
 
 startServer();

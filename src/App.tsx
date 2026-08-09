@@ -25,6 +25,7 @@ import { AdminSourcesManager } from './components/admin/AdminSourcesManager';
 import { AdminSettings } from './components/admin/AdminSettings';
 import { AdminAuditLogs } from './components/admin/AdminAuditLogs';
 import AdminFinalQAPanel from './components/admin/AdminFinalQAPanel';
+import AdminSystemHealth from './components/admin/AdminSystemHealth';
 
 export default function App() {
   // Offline & PWA State
@@ -213,6 +214,8 @@ export default function App() {
               onSelectDraft={(d) => setInspectDraft(d)}
             />
           )}
+
+          {adminTab === 'system-health' && <AdminSystemHealth />}
 
           {(adminTab === 'content-jobs' || adminTab === 'content-results' || adminTab === 'verification-queue') && (
             <AdminContentManager
