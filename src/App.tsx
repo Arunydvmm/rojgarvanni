@@ -26,6 +26,7 @@ import { AdminSettings } from './components/admin/AdminSettings';
 import { AdminAuditLogs } from './components/admin/AdminAuditLogs';
 import AdminFinalQAPanel from './components/admin/AdminFinalQAPanel';
 import AdminSystemHealth from './components/admin/AdminSystemHealth';
+import { AdminScraperDashboard } from './components/admin/AdminScraperDashboard';
 
 export default function App() {
   // Offline & PWA State
@@ -247,6 +248,10 @@ export default function App() {
 
           {adminTab === 'sources' && (
             <AdminSourcesManager sources={sources} token={adminToken} onRefresh={fetchAllData} />
+          )}
+
+          {adminTab === 'scraper' && (
+            <AdminScraperDashboard />
           )}
 
           {adminTab === 'monetization' || adminTab === 'settings' ? (

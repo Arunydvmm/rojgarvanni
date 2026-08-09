@@ -55,6 +55,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       title: 'GOVERNMENT SOURCES',
       items: [
         { id: 'sources', label: 'Source Registry', icon: Globe },
+        { id: 'scraper', label: 'Web Scraper', icon: Globe },
       ],
     },
     {

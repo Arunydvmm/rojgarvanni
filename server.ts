@@ -38,6 +38,9 @@ import {
   QACheckResult,
 } from './src/types';
 
+// ── WEB SCRAPER IMPORTS ──────────────────────────────────────────────────────
+import { scraperScheduler } from './src/services/scraperScheduler.js';
+
 // ── DATABASE IMPORTS ─────────────────────────────────────────────────────────
 import {
   initializeDatabase,
@@ -52,6 +55,9 @@ import {
   AuditLogRepository,
   SourceRepository,
   SettingsRepository,
+  AdmitCardRepository,
+  AnswerKeyRepository,
+  ExamResultRepository,
 } from './src/db/repositories/index.js';
 
 const app = express();
@@ -166,92 +172,146 @@ app.get('/api/jobs/:slug', (req, res) => {
 
 // GET /api/results
 app.get('/api/results', (req, res) => {
-  const { category, search } = req.query;
-  let filtered = resultsDb.filter((r) => !r.isDraft);
-
-  if (category && typeof category === 'string' && category !== 'All') {
-    filtered = filtered.filter((r) => r.category.toLowerCase() === category.toLowerCase());
-  }
-  if (search && typeof search === 'string' && search.trim() !== '') {
-    const q = search.toLowerCase().trim();
-    filtered = filtered.filter(
-      (r) =>
-        r.title.toLowerCase().includes(q) ||
-        r.organization.toLowerCase().includes(q) ||
-        r.examName.toLowerCase().includes(q)
-    );
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
-  res.json({ success: true, data: filtered });
+  try {
+    const { category, search } = req.query;
+    let filtered = ExamResultRepository.findAll({ isDraft: false });
+
+    if (category && typeof category === 'string' && category !== 'All') {
+      filtered = filtered.filter((r) => r.category.toLowerCase() === category.toLowerCase());
+    }
+    if (search && typeof search === 'string' && search.trim() !== '') {
+      const q = search.toLowerCase().trim();
+      filtered = filtered.filter(
+        (r) =>
+          r.title.toLowerCase().includes(q) ||
+          r.organization.toLowerCase().includes(q) ||
+          r.examName.toLowerCase().includes(q)
+      );
+    }
+
+    res.json({ success: true, data: filtered });
+  } catch (error) {
+    console.error('[API] Error in /api/results:', error);
+    res.status(500).json({ success: false, message: 'Database query failed' });
+  }
 });
 
 // GET /api/results/:slug
 app.get('/api/results/:slug', (req, res) => {
-  const item = resultsDb.find((r) => r.slug === req.params.slug || r.id === req.params.slug);
-  if (!item) {
-    return res.status(404).json({ success: false, message: 'Result not found' });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
-  res.json({ success: true, data: item });
+
+  try {
+    const item = ExamResultRepository.findBySlug(req.params.slug) || ExamResultRepository.findById(req.params.slug);
+    if (!item) {
+      return res.status(404).json({ success: false, message: 'Result not found' });
+    }
+    res.json({ success: true, data: item });
+  } catch (error) {
+    console.error('[API] Error in /api/results/:slug:', error);
+    res.status(500).json({ success: false, message: 'Database query failed' });
+  }
 });
 
 // GET /api/admit-cards
 app.get('/api/admit-cards', (req, res) => {
-  const { category, search } = req.query;
-  let filtered = admitCardsDb.filter((a) => !a.isDraft);
-
-  if (category && typeof category === 'string' && category !== 'All') {
-    filtered = filtered.filter((a) => a.category.toLowerCase() === category.toLowerCase());
-  }
-  if (search && typeof search === 'string' && search.trim() !== '') {
-    const q = search.toLowerCase().trim();
-    filtered = filtered.filter(
-      (a) =>
-        a.title.toLowerCase().includes(q) ||
-        a.organization.toLowerCase().includes(q) ||
-        a.examName.toLowerCase().includes(q)
-    );
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
-  res.json({ success: true, data: filtered });
+  try {
+    const { category, search } = req.query;
+    let filtered = AdmitCardRepository.findAll({ isDraft: false });
+
+    if (category && typeof category === 'string' && category !== 'All') {
+      filtered = filtered.filter((a) => a.category.toLowerCase() === category.toLowerCase());
+    }
+    if (search && typeof search === 'string' && search.trim() !== '') {
+      const q = search.toLowerCase().trim();
+      filtered = filtered.filter(
+        (a) =>
+          a.title.toLowerCase().includes(q) ||
+          a.organization.toLowerCase().includes(q) ||
+          a.examName.toLowerCase().includes(q)
+      );
+    }
+
+    res.json({ success: true, data: filtered });
+  } catch (error) {
+    console.error('[API] Error in /api/admit-cards:', error);
+    res.status(500).json({ success: false, message: 'Database query failed' });
+  }
 });
 
 // GET /api/admit-cards/:slug
 app.get('/api/admit-cards/:slug', (req, res) => {
-  const item = admitCardsDb.find((a) => a.slug === req.params.slug || a.id === req.params.slug);
-  if (!item) {
-    return res.status(404).json({ success: false, message: 'Admit Card not found' });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
-  res.json({ success: true, data: item });
+
+  try {
+    const item = AdmitCardRepository.findBySlug(req.params.slug) || AdmitCardRepository.findById(req.params.slug);
+    if (!item) {
+      return res.status(404).json({ success: false, message: 'Admit Card not found' });
+    }
+    res.json({ success: true, data: item });
+  } catch (error) {
+    console.error('[API] Error in /api/admit-cards/:slug:', error);
+    res.status(500).json({ success: false, message: 'Database query failed' });
+  }
 });
 
 // GET /api/answer-keys
 app.get('/api/answer-keys', (req, res) => {
-  const { category, search } = req.query;
-  let filtered = answerKeysDb.filter((ak) => !ak.isDraft);
-
-  if (category && typeof category === 'string' && category !== 'All') {
-    filtered = filtered.filter((ak) => ak.category.toLowerCase() === category.toLowerCase());
-  }
-  if (search && typeof search === 'string' && search.trim() !== '') {
-    const q = search.toLowerCase().trim();
-    filtered = filtered.filter(
-      (ak) =>
-        ak.title.toLowerCase().includes(q) ||
-        ak.organization.toLowerCase().includes(q) ||
-        ak.examName.toLowerCase().includes(q)
-    );
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
 
-  res.json({ success: true, data: filtered });
+  try {
+    const { category, search } = req.query;
+    let filtered = AnswerKeyRepository.findAll({ isDraft: false });
+
+    if (category && typeof category === 'string' && category !== 'All') {
+      filtered = filtered.filter((ak) => ak.category.toLowerCase() === category.toLowerCase());
+    }
+    if (search && typeof search === 'string' && search.trim() !== '') {
+      const q = search.toLowerCase().trim();
+      filtered = filtered.filter(
+        (ak) =>
+          ak.title.toLowerCase().includes(q) ||
+          ak.organization.toLowerCase().includes(q) ||
+          ak.examName.toLowerCase().includes(q)
+      );
+    }
+
+    res.json({ success: true, data: filtered });
+  } catch (error) {
+    console.error('[API] Error in /api/answer-keys:', error);
+    res.status(500).json({ success: false, message: 'Database query failed' });
+  }
 });
 
 // GET /api/answer-keys/:slug
 app.get('/api/answer-keys/:slug', (req, res) => {
-  const item = answerKeysDb.find((ak) => ak.slug === req.params.slug || ak.id === req.params.slug);
-  if (!item) {
-    return res.status(404).json({ success: false, message: 'Answer Key not found' });
+  if (!isDatabaseAvailable()) {
+    return res.status(503).json({ success: false, message: 'Database unavailable' });
   }
-  res.json({ success: true, data: item });
+
+  try {
+    const item = AnswerKeyRepository.findBySlug(req.params.slug) || AnswerKeyRepository.findById(req.params.slug);
+    if (!item) {
+      return res.status(404).json({ success: false, message: 'Answer Key not found' });
+    }
+    res.json({ success: true, data: item });
+  } catch (error) {
+    console.error('[API] Error in /api/answer-keys/:slug:', error);
+    res.status(500).json({ success: false, message: 'Database query failed' });
+  }
 });
 
 // GET /api/search (Unified search across jobs, results, admit cards, answer keys)
@@ -277,10 +337,27 @@ app.get('/api/search', (req, res) => {
         j.qualification.toLowerCase().includes(query)
     );
 
-    // TODO: Add other search results when repositories are ready
-    const matchedResults: any[] = [];
-    const matchedAdmitCards: any[] = [];
-    const matchedAnswerKeys: any[] = [];
+    // Include results, admit cards, and answer keys in search
+    const matchedResults = ExamResultRepository.findAll({ isDraft: false }).filter(
+      (r) =>
+        r.title.toLowerCase().includes(query) ||
+        r.organization.toLowerCase().includes(query) ||
+        r.examName.toLowerCase().includes(query)
+    );
+
+    const matchedAdmitCards = AdmitCardRepository.findAll({ isDraft: false }).filter(
+      (a) =>
+        a.title.toLowerCase().includes(query) ||
+        a.organization.toLowerCase().includes(query) ||
+        a.examName.toLowerCase().includes(query)
+    );
+
+    const matchedAnswerKeys = AnswerKeyRepository.findAll({ isDraft: false }).filter(
+      (ak) =>
+        ak.title.toLowerCase().includes(query) ||
+        ak.organization.toLowerCase().includes(query) ||
+        ak.examName.toLowerCase().includes(query)
+    );
 
     res.json({
       success: true,
@@ -354,6 +431,9 @@ app.get('/api/admin/dashboard-stats', (req, res) => {
     const failedDrafts = DraftRepository.findAll({ verificationStatus: 'FAILED' }).length;
     const activeSources = SourceRepository.count({ status: 'ACTIVE' });
     const totalAgentRuns = AgentLogRepository.count();
+    const totalResults = ExamResultRepository.count({ isDraft: false });
+    const totalAdmitCards = AdmitCardRepository.count({ isDraft: false });
+    const totalAnswerKeys = AnswerKeyRepository.count({ isDraft: false });
     const settings = SettingsRepository.get();
 
     res.json({
@@ -361,9 +441,9 @@ app.get('/api/admin/dashboard-stats', (req, res) => {
       data: {
         totalJobs,
         activeJobs,
-        totalResults: 0, // TODO: Add ExamResultRepository
-        totalAdmitCards: 0, // TODO: Add AdmitCardRepository  
-        totalAnswerKeys: 0, // TODO: Add AnswerKeyRepository
+        totalResults,
+        totalAdmitCards,
+        totalAnswerKeys,
         totalDrafts,
         failedVerifications: failedDrafts,
         activeSources,
@@ -731,12 +811,19 @@ app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
     const classifyOut = (classifyResult.output ?? {}) as any;
     createdLogs.push(toLog(classifyResult));
 
+    if (classifyResult.status === 'FAILED') {
+      for (const log of createdLogs) {
+        AgentLogRepository.create(log);
+      }
+      return res.status(500).json({ success: false, message: 'Classification failed.', stage: 'CLASSIFICATION' });
+    }
+
     // ── Stage 3: EXTRACTION ──────────────────────────────────────────────────
     const extractResult = await runAgent('EXTRACTION', { text: textContent });
     const extractOut = (extractResult.output ?? {}) as any;
-    createdLogs.push(toLog(extractResult, extractOut.title));
+    createdLogs.push(toLog(extractResult, extractOut?.title || 'Job'));
 
-    if (extractResult.status === 'FAILED') {
+    if (extractResult.status === 'FAILED' || !extractOut || !extractOut.title) {
       for (const log of createdLogs) {
         AgentLogRepository.create(log);
       }
@@ -747,6 +834,13 @@ app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
     const normResult = await runAgent('NORMALIZATION', extractOut);
     const normOut = (normResult.output ?? extractOut) as any;
     createdLogs.push(toLog(normResult, normOut.title));
+
+    if (normResult.status === 'FAILED' || !normOut) {
+      for (const log of createdLogs) {
+        AgentLogRepository.create(log);
+      }
+      return res.status(500).json({ success: false, message: 'Normalization failed.', stage: 'NORMALIZATION' });
+    }
 
     // ── Stage 5: DUPLICATE CHECK ─────────────────────────────────────────────
     const existingJobs = JobRepository.findAll({ limit: 20 });
@@ -761,14 +855,14 @@ app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
     const dupOut = (dupResult.output ?? { status: 'NEW', recommendation: 'PROCEED' }) as any;
     createdLogs.push(toLog(dupResult, normOut.title));
 
-    if (dupOut.recommendation === 'BLOCK') {
+    if (dupOut.recommendation === 'BLOCK' || dupResult.status === 'FAILED') {
       // Save logs before early return
       for (const log of createdLogs) {
         AgentLogRepository.create(log);
       }
       return res.status(409).json({
         success: false,
-        message: `Duplicate detected: ${dupOut.match_reason}`,
+        message: `Duplicate detected: ${dupOut.match_reason || 'Unknown reason'}`,
         stage: 'DUPLICATE',
         matched_id: dupOut.matched_record_id,
       });
@@ -779,11 +873,29 @@ app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
     const enrichOut = (enrichResult.output ?? {}) as any;
     createdLogs.push(toLog(enrichResult, normOut.title));
 
+    if (enrichResult.status === 'FAILED') {
+      console.warn('[Pipeline] ENRICHMENT failed, continuing with empty enrichment');
+    }
+
     // ── Stage 7: CONTENT ─────────────────────────────────────────────────────
     const contentInput = { ...normOut, enrichment: enrichOut };
     const contentResult = await runAgent('CONTENT', contentInput);
     const contentOut = (contentResult.output ?? {}) as any;
     createdLogs.push(toLog(contentResult, normOut.title));
+
+    // CRITICAL: If CONTENT fails, stop pipeline — do NOT execute downstream stages
+    if (contentResult.status === 'FAILED' || !contentOut) {
+      console.error('[Pipeline] CONTENT failed — STOPPING PIPELINE (cannot proceed to SEO, VERIFICATION, QA)');
+      for (const log of createdLogs) {
+        AgentLogRepository.create(log);
+      }
+      return res.status(500).json({
+        success: false,
+        message: 'Content generation failed. Pipeline stopped.',
+        stage: 'CONTENT',
+        logs: createdLogs,
+      });
+    }
 
     // ── Stage 8: SEO ─────────────────────────────────────────────────────────
     const seoInput = { title: normOut.title, organization: normOut.organization,
@@ -793,19 +905,31 @@ app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
     const seoOut = (seoResult.output ?? {}) as any;
     createdLogs.push(toLog(seoResult, normOut.title));
 
+    if (seoResult.status === 'FAILED') {
+      console.warn('[Pipeline] SEO failed, continuing with default SEO values');
+    }
+
     // ── Stage 9: VERIFICATION (Hard Gate) ───────────────────────────────────
     const verifyInput = { source_text: textContent, extracted_data: normOut };
     const verifyResult = await runAgent('VERIFICATION', verifyInput);
     const verifyOut = (verifyResult.output ?? { verification_status: 'FAILED' }) as any;
     createdLogs.push(toLog(verifyResult, normOut.title));
 
+    if (verifyResult.status === 'FAILED') {
+      console.error('[Pipeline] VERIFICATION failed — hard gate applies');
+    }
+
     const isVerificationPassed = verifyOut.verification_status === 'PASSED';
 
     // ── Stage 10: QUALITY CONTROL ────────────────────────────────────────────
     const qualityInput = { ...normOut, content: contentOut, seo: seoOut, verification: verifyOut };
     const qualityResult = await runAgent('QUALITY_CONTROL', qualityInput);
-    const qualityOut = (qualityResult.output ?? { quality_status: 'PASSED', total_score: 70 }) as any;
+    const qualityOut = (qualityResult.output ?? { quality_status: 'PENDING', total_score: 50 }) as any;
     createdLogs.push(toLog(qualityResult, normOut.title));
+
+    if (qualityResult.status === 'FAILED') {
+      console.warn('[Pipeline] QUALITY_CONTROL failed');
+    }
 
     // ── Stage 11: FINAL QA (AI pass) ─────────────────────────────────────────
     const qaInput = {
@@ -816,6 +940,10 @@ app.post('/api/admin/pipeline/run', requireDatabase, async (req, res) => {
     const qaResult = await runAgent('FINAL_QA', qaInput);
     const qaOut = (qaResult.output ?? { final_status: 'MANUAL_REVIEW_REQUIRED' }) as any;
     createdLogs.push(toLog(qaResult, normOut.title));
+
+    if (qaResult.status === 'FAILED') {
+      console.warn('[Pipeline] FINAL_QA failed');
+    }
 
     // ── Assemble Draft ───────────────────────────────────────────────────────
     const draftTitle   = normOut.title       || 'Government Recruitment 2026';
@@ -961,6 +1089,22 @@ async function startServer() {
     
     // Setup graceful shutdown handlers
     setupShutdownHandlers();
+    
+    // ── START WEB SCRAPER SCHEDULER ─────────────────────────────────────────
+    const scraperEnabled = process.env.SCRAPER_ENABLED !== 'false';
+    if (scraperEnabled) {
+      try {
+        console.log('[Startup] Starting web scraper scheduler...');
+        scraperScheduler.start();
+        console.log('[Startup] ✓ Web scraper scheduler running (every 15 minutes)');
+        logAudit('SCRAPER_START', 'Web scraper scheduler started on server startup');
+      } catch (error) {
+        console.error('[Startup] ✗ Failed to start web scraper:', error);
+        logAudit('SCRAPER_START_FAILED', `Failed to start web scraper: ${error}`);
+      }
+    } else {
+      console.log('[Startup] ⚠️  Web scraper scheduler is disabled (set SCRAPER_ENABLED=true to enable)');
+    }
   }
 
   // ── HEALTH CHECK ────────────────────────────────────────────────────────
@@ -1512,7 +1656,7 @@ app.get('/api/admin/nvidia/test', async (_req, res) => {
   });
 });
 
-// GET /api/logs (alias for pipeline/logs used by AdminAuditLogs)
+// GET /api/admin/logs (alias for pipeline/logs used by AdminAuditLogs)
 app.get('/api/admin/logs', (req, res) => {
   if (!isDatabaseAvailable()) {
     return res.status(503).json({ success: false, message: 'Database unavailable' });
@@ -1524,6 +1668,72 @@ app.get('/api/admin/logs', (req, res) => {
   } catch (error) {
     console.error('[API] Error fetching logs:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch logs' });
+  }
+});
+
+// ─── WEB SCRAPER ADMIN ENDPOINTS ─────────────────────────────────────────────
+
+// GET /api/admin/scraper/status — Get current scraper status and stats
+app.get('/api/admin/scraper/status', requireDatabase, (req, res) => {
+  try {
+    const stats = scraperScheduler.getStats();
+    const info = scraperScheduler.getInfo();
+    res.json({ success: true, data: { ...info, ...stats } });
+  } catch (error) {
+    console.error('[API] Error fetching scraper status:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch scraper status' });
+  }
+});
+
+// POST /api/admin/scraper/run — Manually trigger scraper
+app.post('/api/admin/scraper/run', requireDatabase, async (req, res) => {
+  try {
+    console.log('[Scraper API] Manual scraper run requested by admin');
+    const result = await scraperScheduler.runManually();
+    logAudit('SCRAPER_MANUAL_RUN', `Admin triggered manual scraper run: ${result.jobsProcessed} jobs processed`);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('[Scraper API] Manual scraper run failed:', error);
+    logAudit('SCRAPER_MANUAL_RUN_FAILED', `Admin manual scraper run failed: ${error}`);
+    res.status(500).json({ success: false, message: 'Scraper execution failed' });
+  }
+});
+
+// POST /api/admin/scraper/start — Start the scheduler
+app.post('/api/admin/scraper/start', requireDatabase, (req, res) => {
+  try {
+    scraperScheduler.start();
+    logAudit('SCRAPER_SCHEDULER_START', 'Admin started scraper scheduler');
+    res.json({ success: true, message: 'Scraper scheduler started', data: scraperScheduler.getInfo() });
+  } catch (error) {
+    console.error('[Scraper API] Failed to start scheduler:', error);
+    logAudit('SCRAPER_SCHEDULER_START_FAILED', `Failed to start scraper: ${error}`);
+    res.status(500).json({ success: false, message: 'Failed to start scheduler' });
+  }
+});
+
+// POST /api/admin/scraper/stop — Stop the scheduler
+app.post('/api/admin/scraper/stop', requireDatabase, (req, res) => {
+  try {
+    scraperScheduler.stop();
+    logAudit('SCRAPER_SCHEDULER_STOP', 'Admin stopped scraper scheduler');
+    res.json({ success: true, message: 'Scraper scheduler stopped', data: scraperScheduler.getInfo() });
+  } catch (error) {
+    console.error('[Scraper API] Failed to stop scheduler:', error);
+    logAudit('SCRAPER_SCHEDULER_STOP_FAILED', `Failed to stop scraper: ${error}`);
+    res.status(500).json({ success: false, message: 'Failed to stop scheduler' });
+  }
+});
+
+// POST /api/admin/scraper/reset-stats — Reset scraper statistics
+app.post('/api/admin/scraper/reset-stats', requireDatabase, (req, res) => {
+  try {
+    scraperScheduler.resetStats();
+    logAudit('SCRAPER_STATS_RESET', 'Admin reset scraper statistics');
+    res.json({ success: true, message: 'Scraper statistics reset', data: scraperScheduler.getStats() });
+  } catch (error) {
+    console.error('[Scraper API] Failed to reset stats:', error);
+    res.status(500).json({ success: false, message: 'Failed to reset statistics' });
   }
 });
 

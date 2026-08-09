@@ -188,36 +188,115 @@ export async function nvidiaChat(
   };
 }
 
+// ─── Centralized JSON Response Handler ────────────────────────────────────────
+
+/**
+ * Process NVIDIA model output with robust JSON extraction,
+ * repair, and validation.
+ *
+ * Handles:
+ * - Plain JSON
+ * - Markdown-wrapped JSON
+ * - JSON with surrounding text
+ * - Invalid JSON with repair attempts
+ *
+ * @throws NvidiaParseError if JSON cannot be extracted/repaired
+ */
+export function parseStructuredResponse(raw: string, schema?: Record<string, any>): unknown {
+  // Step 1: Clean whitespace
+  const cleaned = raw.trim();
+
+  // Step 2: Try direct parse
+  try {
+    const result = JSON.parse(cleaned);
+    if (schema) validateSchema(result, schema);
+    return result;
+  } catch { /* continue */ }
+
+  // Step 3: Extract from ```json ... ``` fences
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch) {
+    try {
+      const result = JSON.parse(fenceMatch[1].trim());
+      if (schema) validateSchema(result, schema);
+      return result;
+    } catch { /* continue */ }
+  }
+
+  // Step 4: Extract first { ... } block or [ ... ] array
+  let braceStart = cleaned.indexOf('{');
+  let braceEnd = cleaned.lastIndexOf('}');
+  let isArray = false;
+
+  if ((braceStart === -1 || braceEnd <= braceStart) && cleaned.includes('[')) {
+    isArray = true;
+    braceStart = cleaned.indexOf('[');
+    braceEnd = cleaned.lastIndexOf(']');
+  }
+
+  if (braceStart !== -1 && braceEnd > braceStart) {
+    const extracted = cleaned.slice(braceStart, braceEnd + 1);
+    try {
+      const result = JSON.parse(extracted);
+      if (schema) validateSchema(result, schema);
+      return result;
+    } catch { /* continue */ }
+  }
+
+  // Step 5: Attempt repair (remove trailing commas, quote keys, etc.)
+  try {
+    const repaired = attemptRepair(cleaned);
+    const result = JSON.parse(repaired);
+    if (schema) validateSchema(result, schema);
+    console.warn('[NVIDIA] Parsed response after repair');
+    return result;
+  } catch { /* continue */ }
+
+  // Step 6: If all else fails, throw
+  throw new NvidiaParseError(raw);
+}
+
+/**
+ * Attempt to repair common JSON formatting issues
+ */
+function attemptRepair(text: string): string {
+  let repaired = text;
+
+  // Remove trailing commas before closing braces/brackets
+  repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
+
+  // Quote unquoted keys (simple cases only)
+  repaired = repaired.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+
+  return repaired;
+}
+
+/**
+ * Basic schema validation (not strict, just checks top-level keys exist)
+ */
+function validateSchema(obj: unknown, schema: Record<string, any>): void {
+  if (typeof obj !== 'object' || obj === null) {
+    throw new Error('Expected object');
+  }
+
+  const required = Object.keys(schema).filter((k) => schema[k] === 'required');
+  for (const key of required) {
+    if (!(key in obj)) {
+      throw new Error(`Missing required field: ${key}`);
+    }
+  }
+}
+
 // ─── JSON Extraction Helper ───────────────────────────────────────────────────
 
 /**
  * Extract a JSON object from a model response that may contain
  * markdown code fences or surrounding prose.
+ * 
+ * DEPRECATED: Use parseStructuredResponse() instead for production.
  */
 export function extractJSON(raw: string): unknown {
-  // 1. Try direct parse
-  try {
-    return JSON.parse(raw.trim());
-  } catch { /* ignore */ }
-
-  // 2. Extract from ```json ... ``` fences
-  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenceMatch) {
-    try {
-      return JSON.parse(fenceMatch[1].trim());
-    } catch { /* ignore */ }
-  }
-
-  // 3. Extract first { ... } block
-  const braceStart = raw.indexOf('{');
-  const braceEnd = raw.lastIndexOf('}');
-  if (braceStart !== -1 && braceEnd > braceStart) {
-    try {
-      return JSON.parse(raw.slice(braceStart, braceEnd + 1));
-    } catch { /* ignore */ }
-  }
-
-  throw new NvidiaParseError(raw);
+  return parseStructuredResponse(raw);
 }
 
 // ─── Connection Test ──────────────────────────────────────────────────────────
