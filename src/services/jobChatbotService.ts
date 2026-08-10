@@ -8,10 +8,11 @@
 
 import axios, { AxiosInstance } from 'axios';
 
-// Chatbot-specific NVIDIA configuration
+// Chatbot-specific NVIDIA configuration - use same config as main pipeline
 const CHATBOT_API_KEY = process.env.NVIDIA_CHATBOT_API_KEY || process.env.NVIDIA_API_KEY;
 const CHATBOT_API_BASE = 'https://integrate.api.nvidia.com/v1';
-const CHATBOT_MODEL = process.env.CHATBOT_MODEL || 'nvidia/llama-3.1-nemotron-70b-instruct';
+// Use the same model as main pipeline to avoid 403 issues
+const CHATBOT_MODEL = process.env.NVIDIA_MODEL || 'nvidia/nvidia-nemotron-nano-9b-v2';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -163,6 +164,20 @@ export async function generateChatbotResponse(
 
   } catch (error: any) {
     console.error('[Chatbot] Error generating response:', error.message);
+    
+    // Check for 403 error specifically
+    if (error.response?.status === 403) {
+      console.error('[Chatbot] 403 Forbidden Error Details:');
+      console.error('  - API Key configured:', !!CHATBOT_API_KEY);
+      console.error('  - Model being used:', CHATBOT_MODEL);
+      console.error('  - API Base URL:', CHATBOT_API_BASE);
+      console.error('  - Error details:', error.response?.data || 'No additional details');
+      
+      return {
+        success: false,
+        message: 'Chatbot API access denied (403). Please check NVIDIA API key configuration. Using cached job data for now.',
+      };
+    }
 
     // Return fallback response
     return {
