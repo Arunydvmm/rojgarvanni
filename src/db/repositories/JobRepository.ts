@@ -89,6 +89,19 @@ export class JobRepository {
   }
 
   /**
+   * Find job by organization and title (for deduplication)
+   */
+  static async findByOrgAndTitle(organization: string, title: string): Promise<GovtJob | null> {
+    const db = getDatabase();
+    const result = await db.query(
+      'SELECT * FROM jobs WHERE organization = $1 AND title = $2 LIMIT 1',
+      [organization, title]
+    );
+    const row = result.rows[0];
+    return row ? this.mapRowToJob(row) : null;
+  }
+
+  /**
    * Find job by slug
    */
   static async findBySlug(slug: string): Promise<GovtJob | null> {

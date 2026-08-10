@@ -1,20 +1,20 @@
 /**
- * Web Scraper Scheduler
+ * Web Scraper Scheduler + AI Pipeline Processor
  * 
  * Manages automated scraping tasks using node-cron
- * Runs scraper every 15 minutes and integrates results into the database
+ * API Data → Simplified 5-Stage AI Pipeline → Published Articles
  */
 
 import cron from 'node-cron';
 import { isDatabaseAvailable } from '../db/database.js';
 import { 
-  DraftRepository, 
   SourceRepository, 
-  AgentLogRepository,
-  AuditLogRepository
+  AuditLogRepository,
+  JobRepository
 } from '../db/repositories/index.js';
 import { sarkariResultScraper, type ScraperResult, type ScrapedJobData } from './webScraperService.js';
-import type { GovtJobDraft, AgentLog, AuditLog, SourceRegistry } from '../types.js';
+import { simplifiedPipelineService } from './persistentPipelineService.js';
+import type { AuditLog, SourceRegistry } from '../types.js';
 
 export interface SchedulerConfig {
   interval: string; // Cron expression
@@ -33,13 +33,13 @@ export interface ScraperStats {
   successfulRuns: number;
   failedRuns: number;
   totalJobsScraped: number;
-  totalJobsProcessed: number;
+  totalJobsPublished: number;
   nextRun?: Date;
 }
 
 /**
  * Scraper Scheduler
- * Manages cron jobs for automated scraping
+ * API Fetch → Minimal AI Pipeline → Direct Publication
  */
 export class ScraperScheduler {
   private cronJob: cron.ScheduledTask | null = null;
@@ -50,7 +50,7 @@ export class ScraperScheduler {
     successfulRuns: 0,
     failedRuns: 0,
     totalJobsScraped: 0,
-    totalJobsProcessed: 0
+    totalJobsPublished: 0
   };
   private isProcessing = false;
 
@@ -58,7 +58,7 @@ export class ScraperScheduler {
     this.config = {
       interval: config.interval || '*/15 * * * *', // Every 15 minutes by default
       enabled: config.enabled !== false,
-      maxRetries: config.maxRetries || 3,
+      maxRetries: config.maxRetries || 2,
       onSuccess: config.onSuccess,
       onError: config.onError
     };
@@ -69,7 +69,7 @@ export class ScraperScheduler {
    */
   start(): void {
     if (!this.config.enabled) {
-      console.log('[Scheduler] Scraper scheduler is disabled');
+      console.log('[Scheduler] API scheduler is disabled');
       return;
     }
 
@@ -78,7 +78,7 @@ export class ScraperScheduler {
       return;
     }
 
-    console.log(`[Scheduler] Starting web scraper scheduler (interval: ${this.config.interval})`);
+    console.log(`[Scheduler] Starting API → Pipeline scheduler (interval: ${this.config.interval})`);
 
     this.cronJob = cron.schedule(this.config.interval, () => {
       this.executeScraperTask();
@@ -109,7 +109,7 @@ export class ScraperScheduler {
   getStats(): ScraperStats {
     return {
       ...this.stats,
-      nextRun: this.cronJob ? new Date(Date.now() + 15 * 60 * 1000) : undefined // Estimate next run
+      nextRun: this.cronJob ? new Date(Date.now() + 15 * 60 * 1000) : undefined
     };
   }
 
@@ -123,7 +123,7 @@ export class ScraperScheduler {
       successfulRuns: 0,
       failedRuns: 0,
       totalJobsScraped: 0,
-      totalJobsProcessed: 0
+      totalJobsPublished: 0
     };
     console.log('[Scheduler] Statistics reset');
   }
@@ -132,9 +132,8 @@ export class ScraperScheduler {
    * Execute scraper task
    */
   private async executeScraperTask(): Promise<void> {
-    // Prevent concurrent executions
     if (this.isProcessing) {
-      console.warn('[Scheduler] Scraper task already in progress, skipping this cycle');
+      console.warn('[Scheduler] Task already in progress, skipping');
       return;
     }
 
@@ -142,18 +141,17 @@ export class ScraperScheduler {
     const startTime = Date.now();
 
     try {
-      // Check database availability
       if (!isDatabaseAvailable()) {
-        throw new Error('Database is not available - cannot process scraped data');
+        throw new Error('Database is not available');
       }
 
-      console.log('[Scheduler] Starting scraper task...');
+      console.log('[Scheduler] Starting RapidAPI → Pipeline cycle...');
       this.stats.totalRuns++;
 
-      // Run scraper
+      // Fetch from API
       const result = await this.runScraperWithRetry();
 
-      // Process results
+      // Process through pipeline
       await this.processScraperResults(result);
 
       // Update stats
@@ -161,11 +159,10 @@ export class ScraperScheduler {
       this.stats.lastSuccess = new Date();
       this.stats.successfulRuns++;
       this.stats.totalJobsScraped += result.jobsFound;
-      this.stats.totalJobsProcessed += result.jobsProcessed;
 
       console.log(
-        `[Scheduler] ✓ Scraper task completed successfully in ${Date.now() - startTime}ms ` +
-        `(${result.jobsProcessed} jobs processed)`
+        `[Scheduler] ✓ Cycle complete in ${Date.now() - startTime}ms ` +
+        `(${result.jobsFound} fetched, published via pipeline)`
       );
 
       if (this.config.onSuccess) {
@@ -179,22 +176,21 @@ export class ScraperScheduler {
       this.stats.failedRuns++;
 
       console.error(
-        `[Scheduler] ✗ Scraper task failed after ${Date.now() - startTime}ms: ${errorMsg}`
+        `[Scheduler] ✗ Cycle failed after ${Date.now() - startTime}ms: ${errorMsg}`
       );
 
-      // Log to audit trail
       try {
         const auditLog: AuditLog = {
           id: `aud-scraper-error-${Date.now()}`,
           adminUser: 'Scheduler',
           action: 'SCRAPER_ERROR',
-          details: `RapidAPI scraper failed: ${errorMsg}`,
+          details: `RapidAPI scheduler error: ${errorMsg}`,
           ipAddress: '127.0.0.1',
           timestamp: new Date().toISOString()
         };
         AuditLogRepository.create(auditLog);
       } catch (auditError) {
-        console.error('[Scheduler] Failed to log error to audit trail:', auditError);
+        console.error('[Scheduler] Failed to log error:', auditError);
       }
 
       if (this.config.onError) {
@@ -206,15 +202,14 @@ export class ScraperScheduler {
   }
 
   /**
-   * Run scraper with retry logic
+   * Fetch from RapidAPI with retry
    */
   private async runScraperWithRetry(attempt = 1): Promise<ScraperResult> {
     try {
-      // Updated to use new API-based method
       return await sarkariResultScraper.fetchLatestJobs();
     } catch (error) {
       if (attempt < this.config.maxRetries) {
-        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+        const delay = Math.pow(2, attempt) * 1000;
         console.warn(
           `[Scheduler] Retry ${attempt}/${this.config.maxRetries} after ${delay}ms: ` +
           `${error instanceof Error ? error.message : error}`
@@ -227,83 +222,74 @@ export class ScraperScheduler {
   }
 
   /**
-   * Process scraper results and save to database
+   * Process scraped data through simplified 5-stage pipeline
+   * API Data → DISCOVERY → EXTRACTION → CONTENT → SEO → FINAL_QA → Published Article
    */
   private async processScraperResults(result: ScraperResult): Promise<void> {
     if (!isDatabaseAvailable()) {
-      throw new Error('Database not available for processing results');
+      throw new Error('Database not available for pipeline processing');
     }
 
     if (!result.success || result.jobs.length === 0) {
-      console.log('[Scheduler] No new jobs found from scraper');
+      console.log('[Scheduler] No jobs in API response');
       return;
     }
 
-    console.log(`[Scheduler] ▶ Processing ${result.jobs.length} scraped jobs...`);
+    console.log(`[Scheduler] ▶ Sending ${result.jobs.length} jobs through 5-stage AI pipeline...`);
 
-    let createdCount = 0;
-    let skippedCount = 0;
+    let publishedCount = 0;
+    let failedCount = 0;
     const errors: string[] = [];
 
     for (let idx = 0; idx < result.jobs.length; idx++) {
-      const scrapedJob = result.jobs[idx];
-      console.log(`[Scheduler] [${idx + 1}/${result.jobs.length}] Processing: "${scrapedJob.title.substring(0, 40)}..."`);
+      const job = result.jobs[idx];
+      const jobNum = `[${idx + 1}/${result.jobs.length}]`;
 
       try {
-        // Check if job already exists (by URL and organization)
-        const existingJob = await this.checkJobExists(scrapedJob);
-        
-        if (existingJob) {
-          console.log(`[Scheduler] [${idx + 1}] ⊘ Skipped (duplicate)`);
-          skippedCount++;
+        console.log(`[Scheduler] ${jobNum} Processing: "${job.title.substring(0, 40)}..."`);
+
+        // Check for duplicate
+        const existing = await this.checkJobExists(job);
+        if (existing) {
+          console.log(`[Scheduler] ${jobNum} ⊘ Already published (duplicate)`);
+          failedCount++;
           continue;
         }
 
-        // Convert scraped data to draft DIRECTLY (no pipeline for scraped jobs)
-        console.log(`[Scheduler] [${idx + 1}] Converting to draft...`);
-        const draft = sarkariResultScraper.convertToDraft(scrapedJob);
-        console.log(`[Scheduler] [${idx + 1}] Draft ID: ${draft.id}`);
+        // Execute minimal pipeline (5 stages with fallbacks)
+        console.log(`[Scheduler] ${jobNum} ▶ Executing AI pipeline...`);
+        const pipelineResult = await simplifiedPipelineService.executePipeline({
+          title: job.title,
+          organization: job.organization,
+          postNames: job.postNames,
+          totalVacancies: job.totalVacancies,
+          qualification: job.qualification,
+          ageMin: job.ageMin,
+          ageMax: job.ageMax,
+          applicationEnd: job.applicationEnd,
+          applicationStart: job.applicationStart,
+          examDate: job.examDate,
+          category: job.category,
+          postUrl: job.postUrl,
+          source: job.source
+        });
 
-        // Save draft to database
-        try {
-          console.log(`[Scheduler] [${idx + 1}] Saving draft to database...`);
-          await DraftRepository.create(draft);
-          createdCount++;
-          console.log(`[Scheduler] [${idx + 1}] ✓ Created draft: ${draft.title.substring(0, 50)}...`);
-        } catch (dbError) {
-          const errorMsg = dbError instanceof Error ? dbError.message : String(dbError);
-          console.error(`[Scheduler] [${idx + 1}] ✗ Failed to save draft: ${errorMsg}`);
-          skippedCount++;
-          errors.push(`Job ${idx + 1}: ${errorMsg}`);
-          continue;
-        }
-
-        // Create agent log entry
-        const agentLog: AgentLog = {
-          id: `alg-scraper-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          itemTitle: draft.title,
-          agentType: 'DISCOVERY',
-          status: 'SUCCESS',
-          durationMs: 100,
-          modelUsed: 'SarkariResult Scraper',
-          inputSummary: `Scraped job from sarkariresult.com: ${scrapedJob.postUrl}`,
-          outputSummary: `Created draft ready for admin review`,
-          evidenceText: `Source: ${scrapedJob.postUrl}`,
-          timestamp: new Date().toISOString()
-        };
-
-        try {
-          await AgentLogRepository.create(agentLog);
-          console.log(`[Scheduler] [${idx + 1}] ✓ Logged agent execution`);
-        } catch (logError) {
-          console.warn(`[Scheduler] [${idx + 1}] ⚠ Failed to create agent log:`, logError);
+        if (pipelineResult.success && pipelineResult.job) {
+          publishedCount++;
+          this.stats.totalJobsPublished++;
+          console.log(`[Scheduler] ${jobNum} ✓ Published: "${pipelineResult.job.title}"`);
+        } else {
+          failedCount++;
+          const err = pipelineResult.error || 'Unknown error';
+          console.error(`[Scheduler] ${jobNum} ✗ Pipeline failed: ${err}`);
+          errors.push(`Job ${idx + 1}: ${err}`);
         }
 
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error(`[Scheduler] [${idx + 1}] ✗ Error processing job: ${errorMsg}`);
-        console.error(`[Scheduler] [${idx + 1}] Stack:`, error instanceof Error ? error.stack : 'no stack');
-        errors.push(`Job ${idx + 1}: ${errorMsg}`);
+        failedCount++;
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[Scheduler] ${jobNum} ✗ Error: ${errMsg}`);
+        errors.push(`Job ${idx + 1}: ${errMsg}`);
       }
     }
 
@@ -312,7 +298,7 @@ export class ScraperScheduler {
       const sourceReg = sarkariResultScraper.createSourceRegistry();
       sourceReg.lastScan = new Date().toISOString();
       sourceReg.lastSuccessfulScan = new Date().toISOString();
-      sourceReg.jobsExtractedCount += createdCount;
+      sourceReg.jobsExtractedCount += publishedCount;
 
       const existing = SourceRepository.findByName(sourceReg.name);
       if (existing) {
@@ -321,99 +307,46 @@ export class ScraperScheduler {
         SourceRepository.create(sourceReg);
       }
     } catch (error) {
-      console.warn('[Scheduler] Failed to update source registry:', error);
+      console.warn('[Scheduler] Failed to update source:', error);
     }
 
-    // Log summary
-    const auditLog: AuditLog = {
-      id: `aud-scraper-${Date.now()}`,
-      adminUser: 'Scheduler',
-      action: 'SCRAPER_RUN',
-      details: `Scraper found ${result.jobsFound} jobs, created ${createdCount} drafts, skipped ${skippedCount}`,
-      ipAddress: '127.0.0.1',
-      timestamp: new Date().toISOString()
-    };
-
+    // Audit log
     try {
+      const auditLog: AuditLog = {
+        id: `aud-scraper-${Date.now()}`,
+        adminUser: 'Scheduler',
+        action: 'SCRAPER_RUN',
+        details: `RapidAPI: ${result.jobsFound} fetched → Pipeline: ${publishedCount} published, ${failedCount} failed`,
+        ipAddress: '127.0.0.1',
+        timestamp: new Date().toISOString()
+      };
       AuditLogRepository.create(auditLog);
     } catch (error) {
-      console.warn('[Scheduler] Failed to create audit log:', error);
+      console.warn('[Scheduler] Failed to log audit:', error);
     }
 
     console.log(
-      `[Scheduler] Processing complete: Created ${createdCount}, Skipped ${skippedCount}, ` +
-      `Errors: ${errors.length}`
+      `[Scheduler] ✓ Pipeline cycle complete: ${publishedCount} published, ${failedCount} failed`
     );
 
     if (errors.length > 0) {
-      console.warn('[Scheduler] Some errors occurred during processing:', errors);
+      console.warn('[Scheduler] Errors encountered:', errors.slice(0, 3).join(' | '));
     }
   }
 
   /**
-   * Check if job already exists in database
+   * Check if job already exists
    */
-  private async checkJobExists(scrapedJob: ScrapedJobData): Promise<boolean> {
+  private async checkJobExists(job: ScrapedJobData): Promise<boolean> {
     try {
-      // Check by URL hash or title similarity
-      // For now, we'll always create new drafts and let AI dedup handle it
-      return false;
+      const existing = await JobRepository.findByOrgAndTitle(job.organization, job.title);
+      return !!existing;
     } catch (error) {
-      console.warn('[Scheduler] Error checking job existence:', error);
+      console.warn('[Scheduler] Error checking for duplicate:', error);
       return false;
     }
-  }
-
-  /**
-   * Manual trigger for scraper (for testing/debugging)
-   */
-  async runManually(): Promise<{ success: boolean; result?: ScraperResult; error?: string }> {
-    console.log('[Scheduler] ▶ Manual scraper run initiated');
-    this.isProcessing = true;
-    const startTime = Date.now();
-
-    try {
-      if (!isDatabaseAvailable()) {
-        throw new Error('Database is not available - cannot process scraped data');
-      }
-
-      // Run scraper
-      const result = await this.runScraperWithRetry();
-      console.log(`[Scheduler] ✓ Scrape completed in ${Date.now() - startTime}ms: ${result.jobsFound} jobs found`);
-
-      // Process results (save to database)
-      await this.processScraperResults(result);
-
-      console.log(`[Scheduler] ✓ Manual run completed in ${Date.now() - startTime}ms`);
-      return { success: true, result };
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(`[Scheduler] ✗ Manual run failed: ${errorMsg}`);
-      return { success: false, error: errorMsg };
-    } finally {
-      this.isProcessing = false;
-    }
-  }
-
-  /**
-   * Get scheduler info
-   */
-  getInfo() {
-    return {
-      enabled: this.config.enabled,
-      interval: this.config.interval,
-      isRunning: this.stats.isRunning,
-      isProcessing: this.isProcessing,
-      stats: this.getStats()
-    };
   }
 }
 
-/**
- * Create and export scheduler instance
- */
-export const scraperScheduler = new ScraperScheduler({
-  interval: '*/15 * * * *', // Every 15 minutes
-  enabled: true,
-  maxRetries: 3
-});
+// Export singleton
+export const scraperScheduler = new ScraperScheduler();
