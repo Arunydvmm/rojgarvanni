@@ -129,47 +129,118 @@ export class SarkariResultScraper {
    */
   private parseJobData(item: any, source: 'jobs' | 'admissions' | 'results'): ScrapedJobData | null {
     try {
-      // Handle different response formats from different endpoints
-      const title = item.title || item.post_name || item.name || '';
-      if (!title) return null;
+      // The API returns various formats - handle each carefully
+      
+      // Skip if item is just formatted text/string
+      if (typeof item === 'string') {
+        return null;
+      }
 
-      const organization = item.organization || item.org || item.company || '';
-      const postUrl = item.link || item.url || item.apply_url || `https://sarkariresult.com`;
+      // Extract title - look for common field names
+      let title = item.title || item.post_name || item.name || item.position || '';
+      
+      // Clean up title if it contains garbage text
+      if (title && title.length > 200) {
+        // If title is extremely long, it's probably malformed
+        title = title.split(/[\n\r]/)[0].trim();
+      }
+      
+      if (!title || title.length < 3) {
+        return null;
+      }
 
-      // Parse vacancies
-      const vacanciesStr = String(item.vacancies || item.total_vacancies || '0');
-      const totalVacancies = parseInt(vacanciesStr.match(/\d+/)?.[0] || '0', 10) || 0;
+      // Remove "Sarkari Result" spam from title
+      title = title.replace(/sarkari\s+result[^a-z0-9]*/gi, '').trim();
+      
+      if (!title || title.length < 3) {
+        return null;
+      }
+
+      // Extract organization
+      let organization = item.organization || item.org || item.company || item.recruiting_body || '';
+      
+      // Clean organization
+      if (organization) {
+        organization = organization.replace(/sarkari\s+result[^a-z0-9]*/gi, '').trim();
+      }
+      
+      if (!organization) {
+        // Try to infer from title
+        if (title.includes('SSC')) organization = 'Staff Selection Commission';
+        else if (title.includes('UPSC')) organization = 'Union Public Service Commission';
+        else if (title.includes('Bank')) organization = 'Banking Sector';
+        else if (title.includes('Railway')) organization = 'Indian Railways';
+        else if (title.includes('Police')) organization = 'Police Department';
+        else organization = 'Government of India';
+      }
+
+      const postUrl = item.link || item.url || item.apply_url || item.apply_link || 'https://sarkariresult.com';
+      
+      if (!postUrl || postUrl === 'null') {
+        return null;
+      }
+
+      // Parse vacancies - handle multiple formats
+      let totalVacancies = 0;
+      const vacanciesField = item.vacancies || item.total_vacancies || item.positions || item.no_of_posts;
+      
+      if (vacanciesField) {
+        const vacStr = String(vacanciesField);
+        const match = vacStr.match(/\d+/);
+        if (match) {
+          totalVacancies = parseInt(match[0], 10);
+        }
+      }
+
+      // If no vacancies parsed, it's likely invalid
+      if (totalVacancies <= 0) {
+        return null;
+      }
 
       // Parse dates
-      const applicationEnd = item.last_date || item.application_end || item.deadline;
-      const applicationStart = item.start_date || item.application_start;
-      const examDate = item.exam_date || item.written_exam_date;
+      const applicationEnd = item.last_date || item.application_end || item.deadline || item.closing_date;
+      const applicationStart = item.start_date || item.application_start || item.opening_date;
+      const examDate = item.exam_date || item.written_exam_date || item.test_date;
 
       // Parse qualification
-      const qualification = item.qualification || item.eligibility || item.required_qualification || 'Graduation';
+      let qualification = item.qualification || item.eligibility || item.required_qualification || '';
+      
+      // Clean qualification (remove garbage text)
+      if (qualification && qualification.length > 200) {
+        qualification = qualification.split(/[\n\r]/)[0].trim();
+      }
+      
+      if (!qualification || qualification.includes('Result') || qualification.includes('Sarkari')) {
+        qualification = 'Graduation';
+      }
 
       // Parse age
       let ageMin = 18;
       let ageMax = 35;
-      if (item.age_limit || item.age) {
-        const ageMatch = String(item.age_limit || item.age).match(/(\d+)\s*-\s*(\d+)/);
+      
+      const ageField = item.age_limit || item.age || item.age_range || '';
+      if (ageField) {
+        const ageStr = String(ageField);
+        const ageMatch = ageStr.match(/(\d+)\s*[-–to]*\s*(\d+)/);
         if (ageMatch) {
           ageMin = parseInt(ageMatch[1], 10);
           ageMax = parseInt(ageMatch[2], 10);
         }
       }
 
-      // Determine category
+      // Determine category from title or organization
       let category = item.category || 'Central Government';
       if (title.includes('SSC')) category = 'SSC';
       else if (title.includes('UPSC')) category = 'UPSC';
-      else if (title.includes('Bank')) category = 'Banking';
-      else if (title.includes('Railway')) category = 'Railway';
-      else if (title.includes('Police')) category = 'Police';
+      else if (title.includes('Bank') || organization.includes('Bank')) category = 'Banking';
+      else if (title.includes('Railway') || organization.includes('Railway')) category = 'Railway';
+      else if (title.includes('Police') || organization.includes('Police')) category = 'Police';
+      else if (title.includes('UP') || organization.includes('UP')) category = 'State Government';
+      else if (organization.includes('Commission')) category = 'Commission';
 
       const scraped: ScrapedJobData = {
         title: title.trim(),
-        organization: organization.trim() || 'Government of India',
+        organization: organization.trim(),
         postNames: [title.trim()],
         totalVacancies,
         qualification: qualification.trim(),
@@ -183,6 +254,11 @@ export class SarkariResultScraper {
         scrapedAt: new Date().toISOString(),
         source
       };
+
+      // Final validation - ensure we have minimum required fields
+      if (!scraped.title || !scraped.organization || scraped.totalVacancies <= 0) {
+        return null;
+      }
 
       return scraped;
     } catch (error) {
@@ -221,16 +297,30 @@ export class SarkariResultScraper {
         console.log('[Scraper] Fetching /jobs endpoint...');
         const jobsData = await this.fetchWithRetry(this.ENDPOINTS.jobs);
         
+        let jobCount = 0;
         if (Array.isArray(jobsData)) {
+          // Filter and parse each item
           jobsData.forEach((item: any) => {
+            // Skip if item is null, undefined, or empty
+            if (!item) return;
+            
             const parsed = this.parseJobData(item, 'jobs');
-            if (parsed) allJobs.push(parsed);
+            if (parsed) {
+              allJobs.push(parsed);
+              jobCount++;
+            }
           });
-          console.log(`[Scraper] ✓ Fetched ${jobsData.length} items from /jobs`);
+          console.log(`[Scraper] ✓ Parsed ${jobCount}/${jobsData.length} valid items from /jobs`);
         } else if (jobsData && typeof jobsData === 'object') {
+          // Single object response
           const parsed = this.parseJobData(jobsData, 'jobs');
-          if (parsed) allJobs.push(parsed);
-          console.log(`[Scraper] ✓ Fetched 1 item from /jobs`);
+          if (parsed) {
+            allJobs.push(parsed);
+            jobCount = 1;
+          }
+          console.log(`[Scraper] ✓ Parsed ${jobCount} item from /jobs`);
+        } else {
+          console.warn(`[Scraper] ⚠ Unexpected response format from /jobs:`, typeof jobsData);
         }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
@@ -243,16 +333,27 @@ export class SarkariResultScraper {
         console.log('[Scraper] Fetching /admissions endpoint...');
         const admissionsData = await this.fetchWithRetry(this.ENDPOINTS.admissions);
         
+        let admissionCount = 0;
         if (Array.isArray(admissionsData)) {
           admissionsData.forEach((item: any) => {
+            if (!item) return;
+            
             const parsed = this.parseJobData(item, 'admissions');
-            if (parsed) allJobs.push(parsed);
+            if (parsed) {
+              allJobs.push(parsed);
+              admissionCount++;
+            }
           });
-          console.log(`[Scraper] ✓ Fetched ${admissionsData.length} items from /admissions`);
+          console.log(`[Scraper] ✓ Parsed ${admissionCount}/${admissionsData.length} valid items from /admissions`);
         } else if (admissionsData && typeof admissionsData === 'object') {
           const parsed = this.parseJobData(admissionsData, 'admissions');
-          if (parsed) allJobs.push(parsed);
-          console.log(`[Scraper] ✓ Fetched 1 item from /admissions`);
+          if (parsed) {
+            allJobs.push(parsed);
+            admissionCount = 1;
+          }
+          console.log(`[Scraper] ✓ Parsed ${admissionCount} item from /admissions`);
+        } else {
+          console.warn(`[Scraper] ⚠ Unexpected response format from /admissions:`, typeof admissionsData);
         }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
@@ -271,10 +372,15 @@ export class SarkariResultScraper {
 
       const uniqueJobs = Array.from(deduped.values());
 
-      console.log(`[Scraper] ✓ Fetch complete: ${uniqueJobs.length} unique jobs found`);
+      if (uniqueJobs.length === 0) {
+        console.warn('[Scraper] ⚠ No valid jobs parsed from API responses');
+        errors.push('API returned data but no valid jobs could be parsed');
+      }
+
+      console.log(`[Scraper] ✓ Fetch complete: ${uniqueJobs.length} unique valid jobs found`);
 
       return {
-        success: true,
+        success: uniqueJobs.length > 0,
         timestamp: new Date().toISOString(),
         sourceUrl: this.RAPIDAPI_BASE_URL,
         jobsFound: uniqueJobs.length,
