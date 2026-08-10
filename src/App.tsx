@@ -55,6 +55,11 @@ export default function App() {
   const [ads, setAds] = useState<AdCampaign[]>([]);
   const [adsEnabled, setAdsEnabled] = useState<boolean>(false);
   const [drafts, setDrafts] = useState<GovtJobDraft[]>([]);
+
+  // Merge published jobs and drafts for admin views
+  const allJobsAndDrafts = React.useMemo(() => {
+    return [...jobs, ...drafts];
+  }, [jobs, drafts]);
   const [loadingData, setLoadingData] = useState<boolean>(true);
 
   // Check URL Hash or path for admin access
@@ -211,7 +216,7 @@ export default function App() {
         <main className="flex-1 overflow-y-auto">
           {adminTab === 'dashboard' && (
             <AdminDashboard
-              jobs={jobs}
+              jobs={allJobsAndDrafts}
               agentLogs={agentLogs}
               onNavigate={(t) => setAdminTab(t)}
               onSelectDraft={(d) => setInspectDraft(d)}
@@ -222,7 +227,7 @@ export default function App() {
 
           {(adminTab === 'content-jobs' || adminTab === 'content-results' || adminTab === 'verification-queue') && (
             <AdminContentManager
-              jobs={jobs}
+              jobs={allJobsAndDrafts}
               token={adminToken}
               onRefresh={fetchAllData}
               onSelectDraft={(d) => setInspectDraft(d)}
