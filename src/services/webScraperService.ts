@@ -1,17 +1,16 @@
 /**
- * Web Scraper Service for sarkariresult.com
+ * Sarkari Result API Service (RapidAPI)
  * 
- * Fetches government job postings from sarkariresult.com every 15 minutes
- * Parses HTML content and extracts relevant job information
+ * Fetches government job postings from RapidAPI Sarkari Result endpoint
+ * No web scraping needed - clean JSON API data
+ * API limit: 1000 requests per month
  */
 
 import axios, { AxiosInstance } from 'axios';
-import * as cheerio from 'cheerio';
-import type { GovtJob, GovtJobDraft, SourceRegistry, AgentLog } from '../types.js';
+import type { GovtJobDraft, SourceRegistry, AgentLog } from '../types.js';
 
 export interface ScraperConfig {
-  targetUrl: string;
-  headers?: Record<string, string>;
+  apiKey?: string;
   timeout?: number;
   retryAttempts?: number;
   retryDelay?: number;
@@ -31,6 +30,7 @@ export interface ScrapedJobData {
   category?: string;
   postUrl: string;
   scrapedAt: string;
+  source?: 'jobs' | 'admissions' | 'results';
 }
 
 export interface ScraperResult {
@@ -45,348 +45,361 @@ export interface ScraperResult {
 }
 
 /**
- * SarkariResult Web Scraper
- * Extracts job postings from sarkariresult.com
+ * Sarkari Result API Client (RapidAPI)
+ * Uses official API instead of web scraping
+ * Endpoints: /jobs, /admissions, /results
  */
 export class SarkariResultScraper {
   private axiosInstance: AxiosInstance;
+  private apiKey: string;
   private config: Required<ScraperConfig>;
-  private scrapedUrls: Set<string> = new Set();
+  private readonly RAPIDAPI_HOST = 'sarkari-result.p.rapidapi.com';
+  private readonly RAPIDAPI_BASE_URL = 'https://sarkari-result.p.rapidapi.com';
+  private readonly ENDPOINTS = {
+    jobs: '/jobs',
+    admissions: '/admissions',
+    results: '/results'
+  };
 
   constructor(config: ScraperConfig = {}) {
+    this.apiKey = config.apiKey || process.env.SARKARI_RESULT_API_KEY || '';
     this.config = {
-      targetUrl: config.targetUrl || 'https://www.sarkariresult.com/',
-      headers: config.headers || {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
-      },
+      apiKey: this.apiKey,
       timeout: config.timeout || 15000,
-      retryAttempts: config.retryAttempts || 3,
-      retryDelay: config.retryDelay || 2000
+      retryAttempts: config.retryAttempts || 2, // Lower for API to respect rate limits
+      retryDelay: config.retryDelay || 3000 // Longer delay for API
     };
 
     this.axiosInstance = axios.create({
+      baseURL: this.RAPIDAPI_BASE_URL,
       timeout: this.config.timeout,
-      headers: this.config.headers
-    });
-  }
-
-  /**
-   * Fetch HTML content from target URL with retry logic
-   */
-  private async fetchWithRetry(url: string): Promise<string> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
-      try {
-        console.log(`[Scraper] Fetching (attempt ${attempt}/${this.config.retryAttempts}): ${url}`);
-        const response = await this.axiosInstance.get(url);
-        return response.data;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        console.warn(`[Scraper] Attempt ${attempt} failed:`, lastError.message);
-
-        if (attempt < this.config.retryAttempts) {
-          await this.delay(this.config.retryDelay * attempt); // Exponential backoff
-        }
+      headers: {
+        'Content-Type': 'application/json',
+        'x-rapidapi-host': this.RAPIDAPI_HOST,
+        'x-rapidapi-key': this.apiKey
       }
-    }
+    });
 
-    throw new Error(`Failed to fetch ${url} after ${this.config.retryAttempts} attempts: ${lastError?.message}`);
+    if (!this.apiKey) {
+      console.warn('[Scraper] SARKARI_RESULT_API_KEY not configured - scraper disabled');
+    }
   }
 
   /**
-   * Delay helper for retry logic
+   * Delay utility for retry logic
    */
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
-   * Parse job listing table/article from HTML
+   * Fetch from API with retry logic
    */
-  private parseJobPostings($: cheerio.CheerioAPI, html: string): ScrapedJobData[] {
-    const jobs: ScrapedJobData[] = [];
+  private async fetchWithRetry(endpoint: string): Promise<any> {
+    let lastError: Error | null = null;
 
-    try {
-      // Target job article containers (sarkariresult.com uses various selectors)
-      const selectors = [
-        'article',
-        '.post',
-        '.job-posting',
-        'div[class*="job"]',
-        'div[class*="vacancy"]',
-        'table tr'
-      ];
+    for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
+      try {
+        console.log(`[Scraper] Fetching ${endpoint} (attempt ${attempt}/${this.config.retryAttempts})`);
+        const response = await this.axiosInstance.get(endpoint);
+        
+        if (response.status !== 200) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
 
-      for (const selector of selectors) {
-        $(selector).each((index, element) => {
-          try {
-            const $element = $(element);
-            const text = $element.text();
+        return response.data;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        console.warn(`[Scraper] Attempt ${attempt} failed:`, lastError.message);
 
-            // Extract job title
-            const titleMatch = text.match(/^([^:]+(?:Recruitment|Notification|Vacancy|Admit|Result))/i);
-            if (!titleMatch) return;
-
-            const title = titleMatch[1].trim().substring(0, 200);
-
-            // Extract organization name
-            const orgMatch = text.match(/(?:Ministry|Department|Board|Commission|Authority|Bank|Railway|SSC)[\w\s]*/i);
-            const organization = orgMatch ? orgMatch[0].trim() : 'Government of India';
-
-            // Extract key numbers
-            const vacancyMatch = text.match(/(\d+)\s*(?:vacancy|vacancies|post|position)/i);
-            const totalVacancies = vacancyMatch ? parseInt(vacancyMatch[1]) : undefined;
-
-            const ageMatch = text.match(/(\d+)\s*(?:to|–|-)\s*(\d+)\s*years?/i);
-            const ageMin = ageMatch ? parseInt(ageMatch[1]) : undefined;
-            const ageMax = ageMatch ? parseInt(ageMatch[2]) : undefined;
-
-            // Extract dates
-            const datePattern = /(\d{1,2})[/-](\d{1,2})[/-](\d{4})/g;
-            const dates: string[] = [];
-            let dateMatch;
-            while ((dateMatch = datePattern.exec(text)) !== null) {
-              const date = `${dateMatch[3]}-${String(dateMatch[2]).padStart(2, '0')}-${String(dateMatch[1]).padStart(2, '0')}`;
-              dates.push(date);
-            }
-
-            const applicationEnd = dates[dates.length - 1] || undefined;
-            const applicationStart = dates[0] || undefined;
-
-            // Extract qualification
-            const qualMatch = text.match(/(?:Qualification|Eligibility)[\s:]*([^.!?\n]+)/i);
-            const qualification = qualMatch ? qualMatch[1].trim().substring(0, 100) : undefined;
-
-            // Extract category
-            const categoryKeywords = ['SSC', 'UPSC', 'Railway', 'Banking', 'Defence', 'Police', 'Teaching', 'State'];
-            const category = categoryKeywords.find(cat => text.includes(cat)) || 'Central Government';
-
-            // Get link URL
-            const linkElement = $element.find('a').first();
-            const postUrl = linkElement.attr('href') || '';
-
-            if (!postUrl || this.scrapedUrls.has(postUrl)) return;
-
-            this.scrapedUrls.add(postUrl);
-
-            const jobData: ScrapedJobData = {
-              title,
-              organization,
-              postNames: [title],
-              totalVacancies,
-              qualification,
-              ageMin,
-              ageMax,
-              applicationEnd,
-              applicationStart,
-              category,
-              postUrl: this.normalizeUrl(postUrl),
-              scrapedAt: new Date().toISOString()
-            };
-
-            if (title.length > 10 && postUrl.length > 5) {
-              jobs.push(jobData);
-            }
-          } catch (error) {
-            console.warn('[Scraper] Error parsing element:', error instanceof Error ? error.message : error);
-          }
-        });
-
-        if (jobs.length > 0) break; // Stop if we found jobs
+        if (attempt < this.config.retryAttempts) {
+          // Exponential backoff to respect rate limits
+          const delayMs = this.config.retryDelay * Math.pow(2, attempt - 1);
+          console.log(`[Scraper] Waiting ${delayMs}ms before retry...`);
+          await this.delay(delayMs);
+        }
       }
-    } catch (error) {
-      console.error('[Scraper] Error during parsing:', error);
     }
 
-    return jobs;
+    throw new Error(`Failed to fetch ${endpoint} after ${this.config.retryAttempts} attempts: ${lastError?.message}`);
   }
 
   /**
-   * Normalize URLs to absolute paths
+   * Parse API response and convert to ScrapedJobData
    */
-  private normalizeUrl(url: string): string {
-    if (!url) return '';
-    if (url.startsWith('http')) return url;
-    if (url.startsWith('/')) return `https://www.sarkariresult.com${url}`;
-    return `https://www.sarkariresult.com/${url}`;
-  }
-
-  /**
-   * Main scraping method
-   */
-  async scrapeJobs(): Promise<ScraperResult> {
-    const startTime = Date.now();
-    const errors: string[] = [];
-    const jobs: ScrapedJobData[] = [];
-
+  private parseJobData(item: any, source: 'jobs' | 'admissions' | 'results'): ScrapedJobData | null {
     try {
-      console.log('[Scraper] ▶ Starting job scrape from sarkariresult.com');
-      console.log(`[Scraper] Target URL: ${this.config.targetUrl}`);
-      console.log(`[Scraper] Timeout: ${this.config.timeout}ms, Retries: ${this.config.retryAttempts}`);
+      // Handle different response formats from different endpoints
+      const title = item.title || item.post_name || item.name || '';
+      if (!title) return null;
 
-      // Fetch main page
-      const html = await this.fetchWithRetry(this.config.targetUrl);
-      console.log(`[Scraper] ✓ Fetched main page (${html.length} bytes)`);
-      
-      const $ = cheerio.load(html);
+      const organization = item.organization || item.org || item.company || '';
+      const postUrl = item.link || item.url || item.apply_url || `https://sarkariresult.com`;
 
-      // Parse job postings
-      console.log('[Scraper] Parsing job postings...');
-      const parsedJobs = this.parseJobPostings($, html);
-      jobs.push(...parsedJobs);
+      // Parse vacancies
+      const vacanciesStr = String(item.vacancies || item.total_vacancies || '0');
+      const totalVacancies = parseInt(vacanciesStr.match(/\d+/)?.[0] || '0', 10) || 0;
 
-      console.log(`[Scraper] ✓ Parsed ${jobs.length} job postings from main page`);
+      // Parse dates
+      const applicationEnd = item.last_date || item.application_end || item.deadline;
+      const applicationStart = item.start_date || item.application_start;
+      const examDate = item.exam_date || item.written_exam_date;
 
-      // Scrape additional category pages (optional, for more comprehensive data)
-      const categoryUrls = [
-        'https://www.sarkariresult.com/p/ssc.html',
-        'https://www.sarkariresult.com/p/upsc.html',
-        'https://www.sarkariresult.com/p/railway.html'
-      ];
+      // Parse qualification
+      const qualification = item.qualification || item.eligibility || item.required_qualification || 'Graduation';
 
-      for (let catIdx = 0; catIdx < categoryUrls.length; catIdx++) {
-        const categoryUrl = categoryUrls[catIdx];
-        try {
-          console.log(`[Scraper] [${catIdx + 1}/${categoryUrls.length}] Scraping category: ${categoryUrl}`);
-          const categoryHtml = await this.fetchWithRetry(categoryUrl);
-          const $category = cheerio.load(categoryHtml);
-          const categoryJobs = this.parseJobPostings($category, categoryHtml);
-          jobs.push(...categoryJobs);
-          console.log(`[Scraper] [${catIdx + 1}] ✓ Scraped ${categoryJobs.length} jobs`);
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          console.warn(`[Scraper] [${catIdx + 1}] ⚠ Failed to scrape category: ${errorMsg}`);
-          errors.push(`Category scrape failed: ${errorMsg}`);
+      // Parse age
+      let ageMin = 18;
+      let ageMax = 35;
+      if (item.age_limit || item.age) {
+        const ageMatch = String(item.age_limit || item.age).match(/(\d+)\s*-\s*(\d+)/);
+        if (ageMatch) {
+          ageMin = parseInt(ageMatch[1], 10);
+          ageMax = parseInt(ageMatch[2], 10);
         }
       }
 
-      // Remove duplicate URLs
-      const uniqueJobs = jobs.filter((job, index, self) => 
-        self.findIndex(j => j.postUrl === job.postUrl) === index
-      );
+      // Determine category
+      let category = item.category || 'Central Government';
+      if (title.includes('SSC')) category = 'SSC';
+      else if (title.includes('UPSC')) category = 'UPSC';
+      else if (title.includes('Bank')) category = 'Banking';
+      else if (title.includes('Railway')) category = 'Railway';
+      else if (title.includes('Police')) category = 'Police';
 
-      console.log(`[Scraper] ✓ Total jobs found: ${jobs.length}, Unique: ${uniqueJobs.length}`);
-      console.log(`[Scraper] ✓ Scrape completed in ${Date.now() - startTime}ms`);
+      const scraped: ScrapedJobData = {
+        title: title.trim(),
+        organization: organization.trim() || 'Government of India',
+        postNames: [title.trim()],
+        totalVacancies,
+        qualification: qualification.trim(),
+        ageMin,
+        ageMax,
+        applicationEnd,
+        applicationStart,
+        examDate,
+        category,
+        postUrl: postUrl.trim(),
+        scrapedAt: new Date().toISOString(),
+        source
+      };
+
+      return scraped;
+    } catch (error) {
+      console.error('[Scraper] Error parsing job data:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch latest jobs from RapidAPI
+   */
+  async fetchLatestJobs(): Promise<ScraperResult> {
+    const startTime = Date.now();
+
+    if (!this.apiKey) {
+      return {
+        success: false,
+        timestamp: new Date().toISOString(),
+        sourceUrl: this.RAPIDAPI_BASE_URL,
+        jobsFound: 0,
+        jobsProcessed: 0,
+        jobs: [],
+        errors: ['SARKARI_RESULT_API_KEY not configured'],
+        duration: Date.now() - startTime
+      };
+    }
+
+    const allJobs: ScrapedJobData[] = [];
+    const errors: string[] = [];
+
+    try {
+      console.log('[Scraper] Starting API fetch from RapidAPI Sarkari Result endpoints...');
+
+      // Fetch from /jobs endpoint
+      try {
+        console.log('[Scraper] Fetching /jobs endpoint...');
+        const jobsData = await this.fetchWithRetry(this.ENDPOINTS.jobs);
+        
+        if (Array.isArray(jobsData)) {
+          jobsData.forEach((item: any) => {
+            const parsed = this.parseJobData(item, 'jobs');
+            if (parsed) allJobs.push(parsed);
+          });
+          console.log(`[Scraper] ✓ Fetched ${jobsData.length} items from /jobs`);
+        } else if (jobsData && typeof jobsData === 'object') {
+          const parsed = this.parseJobData(jobsData, 'jobs');
+          if (parsed) allJobs.push(parsed);
+          console.log(`[Scraper] ✓ Fetched 1 item from /jobs`);
+        }
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.warn(`[Scraper] ⚠ Failed to fetch /jobs:`, errMsg);
+        errors.push(`jobs endpoint: ${errMsg}`);
+      }
+
+      // Fetch from /admissions endpoint (if different from jobs)
+      try {
+        console.log('[Scraper] Fetching /admissions endpoint...');
+        const admissionsData = await this.fetchWithRetry(this.ENDPOINTS.admissions);
+        
+        if (Array.isArray(admissionsData)) {
+          admissionsData.forEach((item: any) => {
+            const parsed = this.parseJobData(item, 'admissions');
+            if (parsed) allJobs.push(parsed);
+          });
+          console.log(`[Scraper] ✓ Fetched ${admissionsData.length} items from /admissions`);
+        } else if (admissionsData && typeof admissionsData === 'object') {
+          const parsed = this.parseJobData(admissionsData, 'admissions');
+          if (parsed) allJobs.push(parsed);
+          console.log(`[Scraper] ✓ Fetched 1 item from /admissions`);
+        }
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.warn(`[Scraper] ⚠ Failed to fetch /admissions:`, errMsg);
+        errors.push(`admissions endpoint: ${errMsg}`);
+      }
+
+      // Deduplication by title + organization
+      const deduped = new Map<string, ScrapedJobData>();
+      allJobs.forEach((job) => {
+        const key = `${job.title}|${job.organization}`;
+        if (!deduped.has(key)) {
+          deduped.set(key, job);
+        }
+      });
+
+      const uniqueJobs = Array.from(deduped.values());
+
+      console.log(`[Scraper] ✓ Fetch complete: ${uniqueJobs.length} unique jobs found`);
 
       return {
         success: true,
         timestamp: new Date().toISOString(),
-        sourceUrl: this.config.targetUrl,
-        jobsFound: jobs.length,
+        sourceUrl: this.RAPIDAPI_BASE_URL,
+        jobsFound: uniqueJobs.length,
         jobsProcessed: uniqueJobs.length,
         jobs: uniqueJobs,
         errors: errors.length > 0 ? errors : undefined,
         duration: Date.now() - startTime
       };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error('[Scraper] ✗ Scraping failed:', errorMsg);
-      console.error('[Scraper] Stack:', error instanceof Error ? error.stack : 'no stack');
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error('[Scraper] Fatal error:', errMsg);
 
       return {
         success: false,
         timestamp: new Date().toISOString(),
-        sourceUrl: this.config.targetUrl,
+        sourceUrl: this.RAPIDAPI_BASE_URL,
         jobsFound: 0,
-        jobsProcessed: 0,
-        jobs: [],
-        errors: [errorMsg],
+        jobsProcessed: allJobs.length,
+        jobs: allJobs,
+        errors: [errMsg],
         duration: Date.now() - startTime
       };
     }
   }
 
   /**
-   * Convert scraped data to GovtJobDraft for AI pipeline
+   * Convert scraped job data to draft for admin review
    */
-  convertToDraft(scrapedJob: ScrapedJobData): GovtJobDraft {
-    const now = new Date().toISOString();
-    const slug = scrapedJob.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 100);
+  convertToDraft(job: ScrapedJobData): GovtJobDraft {
+    const slug = `${job.organization.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${job.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
 
-    return {
-      id: `draft-scraped-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    const applicationEnd = job.applicationEnd || '2026-12-31';
+    const daysLeft = Math.ceil((new Date(applicationEnd).getTime() - Date.now()) / 86_400_000);
+
+    const draft: GovtJobDraft = {
+      id: `draft-${Date.now()}`,
       slug,
-      title: scrapedJob.title,
-      organization: scrapedJob.organization || 'Government of India',
-      department: 'Government Department',
-      advertisementNumber: `SR-${Date.now()}`,
-      category: (scrapedJob.category as any) || 'Central Government',
+      title: job.title,
+      organization: job.organization || 'Government of India',
+      department: 'Government Ministry/Department',
+      advertisementNumber: `${job.category}/${Date.now()}`,
+      category: job.category || 'Central Government',
       state: 'All India',
-      postNames: scrapedJob.postNames,
-      totalVacancies: scrapedJob.totalVacancies || 0,
-      qualification: scrapedJob.qualification || 'As per official notification',
-      qualificationDetails: scrapedJob.qualification || 'Check official website for detailed qualification requirements',
-      ageMin: scrapedJob.ageMin || 18,
-      ageMax: scrapedJob.ageMax || 65,
-      ageRelaxation: 'As per government rules',
-      applicationStart: scrapedJob.applicationStart || now.split('T')[0],
-      applicationEnd: scrapedJob.applicationEnd || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      feePaymentDeadline: scrapedJob.applicationEnd || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      examDate: scrapedJob.examDate || 'To be announced',
-      applicationFee: { generalObc: '₹100', scSt: '₹0', female: '₹0' },
-      salary: { payLevel: '', payScale: '', basicPay: '' },
-      selectionProcess: ['Written Exam', 'Interview', 'Document Verification'],
-      howToApply: ['Visit official website', 'Fill online application', 'Pay fee', 'Submit'],
-      overview: `Government job notification for ${scrapedJob.title}. For more details visit the official website.`,
+      postNames: job.postNames || [job.title],
+      totalVacancies: job.totalVacancies || 0,
+      categoryWiseVacancies: {
+        ur: Math.floor((job.totalVacancies || 0) * 0.45),
+        obc: Math.floor((job.totalVacancies || 0) * 0.27),
+        sc: Math.floor((job.totalVacancies || 0) * 0.15),
+        st: Math.floor((job.totalVacancies || 0) * 0.08),
+        ews: Math.floor((job.totalVacancies || 0) * 0.05)
+      },
+      qualification: job.qualification || 'Graduation',
+      qualificationDetails: 'As per official notification',
+      ageMin: job.ageMin || 18,
+      ageMax: job.ageMax || 35,
+      ageRelaxation: 'As per government rules (SC/ST: +5 years, OBC: +3 years)',
+      applicationStart: job.applicationStart || new Date().toISOString().split('T')[0],
+      applicationEnd,
+      feePaymentDeadline: job.applicationEnd || applicationEnd,
+      examDate: job.examDate || 'To be announced',
+      applicationFee: {
+        generalObc: '₹100',
+        scSt: '₹0',
+        female: '₹0'
+      },
+      salary: {
+        payLevel: 'As per notification',
+        payScale: 'As per notification',
+        basicPay: 'Not specified in source'
+      },
+      selectionProcess: ['Written Examination', 'Document Verification'],
+      howToApply: ['Visit official website', 'Register and apply online', 'Pay application fee (if applicable)'],
+      overview: `${job.organization} is recruiting ${job.totalVacancies || 'multiple'} candidates for various positions. This is a government job opportunity with competitive salary and benefits. Apply before ${applicationEnd}.`,
       status: 'NEW',
-      isClosingSoon: false,
+      isClosingSoon: daysLeft >= 0 && daysLeft <= 7,
       links: {
-        applyUrl: scrapedJob.postUrl,
-        notificationUrl: scrapedJob.postUrl,
-        officialWebsiteUrl: 'https://www.sarkariresult.com'
+        applyUrl: job.postUrl || '',
+        notificationUrl: job.postUrl || '',
+        officialWebsiteUrl: 'https://www.sarkariresult.com/'
       },
       sourceInfo: {
-        name: 'SarkariResult.com',
-        type: 'RECRUITMENT_BOARD',
-        lastVerified: now.split('T')[0],
-        officialNotificationUrl: scrapedJob.postUrl,
-        evidenceText: `Scraped from sarkariresult.com on ${now}`
+        name: 'RapidAPI Sarkari Result',
+        type: 'API Fetch',
+        lastVerified: new Date().toISOString().split('T')[0],
+        evidenceText: `Fetched from ${job.source} endpoint. Source: ${job.postUrl}`
       },
       verificationStatus: 'PENDING',
       qualityStatus: 'PENDING',
       isDraft: true,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       verificationReport: {
         verificationStatus: 'PENDING',
         qualityScore: 0,
         checkedFields: [],
         criticalErrors: [],
-        warnings: ['Scraped data - requires AI verification before publishing'],
-        evidenceText: `Auto-scraped from sarkariresult.com at ${now}`,
-        verifiedAt: now
+        warnings: ['This is a draft from API - requires admin review and verification'],
+        evidenceText: `API Source: ${job.source}`,
+        verifiedAt: new Date().toISOString()
       },
       agentLogs: []
     };
+
+    return draft;
   }
 
   /**
-   * Create source registry entry
+   * Create source registry entry for RapidAPI
    */
   createSourceRegistry(): SourceRegistry {
     return {
-      id: 'src-sarkariresult',
-      name: 'SarkariResult.com',
-      type: 'RECRUITMENT_BOARD',
-      url: 'https://www.sarkariresult.com/',
-      status: 'ACTIVE',
-      crawlFrequency: 'EVERY_30_MIN',
+      id: 'src-rapidapi-sarkari-result',
+      name: 'RapidAPI Sarkari Result',
+      url: this.RAPIDAPI_BASE_URL,
+      type: 'API',
+      crawlFrequency: 15,
       lastScan: new Date().toISOString(),
       lastSuccessfulScan: new Date().toISOString(),
-      permissionNotes: 'Public government recruitment portal - allowed to scrape',
-      parserType: 'SARKARIRESULT_PARSER',
-      jobsExtractedCount: 0
+      jobsExtractedCount: 0,
+      isActive: !!this.apiKey,
+      permissionNotes: 'RapidAPI - 1000 requests/month limit. Respects rate limits.'
     };
   }
 }
 
-/**
- * Export scraper instance
- */
+// Export singleton instance
 export const sarkariResultScraper = new SarkariResultScraper();
