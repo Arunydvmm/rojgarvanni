@@ -188,7 +188,7 @@ export class ScraperScheduler {
           id: `aud-scraper-error-${Date.now()}`,
           adminUser: 'Scheduler',
           action: 'SCRAPER_ERROR',
-          details: `Web scraper failed: ${errorMsg}`,
+          details: `RapidAPI scraper failed: ${errorMsg}`,
           ipAddress: '127.0.0.1',
           timestamp: new Date().toISOString()
         };
@@ -210,7 +210,8 @@ export class ScraperScheduler {
    */
   private async runScraperWithRetry(attempt = 1): Promise<ScraperResult> {
     try {
-      return await sarkariResultScraper.scrapeJobs();
+      // Updated to use new API-based method
+      return await sarkariResultScraper.fetchLatestJobs();
     } catch (error) {
       if (attempt < this.config.maxRetries) {
         const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
