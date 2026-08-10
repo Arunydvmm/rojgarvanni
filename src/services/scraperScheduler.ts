@@ -11,11 +11,9 @@ import {
   DraftRepository, 
   SourceRepository, 
   AgentLogRepository,
-  AuditLogRepository,
-  PipelineSessionRepository
+  AuditLogRepository
 } from '../db/repositories/index.js';
 import { sarkariResultScraper, type ScraperResult, type ScrapedJobData } from './webScraperService.js';
-import { persistentPipelineService } from './persistentPipelineService.js';
 import type { GovtJobDraft, AgentLog, AuditLog, SourceRegistry } from '../types.js';
 
 export interface SchedulerConfig {
@@ -260,39 +258,45 @@ export class ScraperScheduler {
           continue;
         }
 
-        // Create pipeline session for scraped data
-        console.log(`[Scheduler] [${idx + 1}] Creating pipeline session...`);
-        const pipelineSession = await PipelineSessionRepository.create({
-          source_name: 'SarkariResult Scraper',
-          source_url: scrapedJob.postUrl,
-          raw_text: JSON.stringify(scrapedJob),
-          current_agent_index: 0,
-          current_status: 'PENDING',
-          current_draft: null,
-          completed_agents: [],
-          failed_agent: null,
-          failure_reason: null,
-          admin_review_notes: null,
-        });
+        // Convert scraped data to draft DIRECTLY (no pipeline for scraped jobs)
+        console.log(`[Scheduler] [${idx + 1}] Converting to draft...`);
+        const draft = sarkariResultScraper.convertToDraft(scrapedJob);
+        console.log(`[Scheduler] [${idx + 1}] Draft ID: ${draft.id}`);
 
-        console.log(`[Scheduler] [${idx + 1}] Pipeline session created: ${pipelineSession.id}`);
+        // Save draft to database
+        try {
+          console.log(`[Scheduler] [${idx + 1}] Saving draft to database...`);
+          await DraftRepository.create(draft);
+          createdCount++;
+          console.log(`[Scheduler] [${idx + 1}] ✓ Created draft: ${draft.title.substring(0, 50)}...`);
+        } catch (dbError) {
+          const errorMsg = dbError instanceof Error ? dbError.message : String(dbError);
+          console.error(`[Scheduler] [${idx + 1}] ✗ Failed to save draft: ${errorMsg}`);
+          skippedCount++;
+          errors.push(`Job ${idx + 1}: ${errorMsg}`);
+          continue;
+        }
 
-        // Start pipeline execution asynchronously
-        (async () => {
-          try {
-            const result = await persistentPipelineService.executePipeline(pipelineSession.id, scrapedJob);
-            if (!result.success) {
-              console.warn(`[Scheduler] Pipeline failed for job ${idx + 1}: ${result.error}`);
-            } else {
-              console.log(`[Scheduler] ✓ Pipeline completed for job ${idx + 1}: ${result.draft?.id}`);
-            }
-          } catch (pipelineError) {
-            console.error(`[Scheduler] Pipeline error for job ${idx + 1}:`, pipelineError);
-          }
-        })();
+        // Create agent log entry
+        const agentLog: AgentLog = {
+          id: `alg-scraper-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          itemTitle: draft.title,
+          agentType: 'DISCOVERY',
+          status: 'SUCCESS',
+          durationMs: 100,
+          modelUsed: 'SarkariResult Scraper',
+          inputSummary: `Scraped job from sarkariresult.com: ${scrapedJob.postUrl}`,
+          outputSummary: `Created draft ready for admin review`,
+          evidenceText: `Source: ${scrapedJob.postUrl}`,
+          timestamp: new Date().toISOString()
+        };
 
-        createdCount++;
-        console.log(`[Scheduler] [${idx + 1}] ✓ Pipeline session created and queued`);
+        try {
+          await AgentLogRepository.create(agentLog);
+          console.log(`[Scheduler] [${idx + 1}] ✓ Logged agent execution`);
+        } catch (logError) {
+          console.warn(`[Scheduler] [${idx + 1}] ⚠ Failed to create agent log:`, logError);
+        }
 
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
