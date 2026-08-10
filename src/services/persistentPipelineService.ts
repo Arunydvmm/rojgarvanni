@@ -146,12 +146,16 @@ export const persistentPipelineService = {
             );
           }
 
-          if (stage.id === 'CONTENT' && !agentOutput) {
-            throw new Error('Content generation failed - no output');
+          // Check if agent failed
+          if (agentResult.status === 'FAILED') {
+            throw new Error(
+              `${stage.id} agent failed: ${agentResult.errorMessage || 'No error message provided'}`
+            );
           }
 
-          if (stage.id === 'SEO' && agentResult.status === 'FAILED') {
-            throw new Error('SEO generation failed');
+          // Validate output is not empty
+          if (!agentOutput || (typeof agentOutput === 'object' && Object.keys(agentOutput).length === 0)) {
+            throw new Error(`${stage.id} agent produced empty output`);
           }
 
           // Update checkpoint with success
