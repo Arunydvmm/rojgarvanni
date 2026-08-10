@@ -8,11 +8,13 @@
 
 import axios, { AxiosInstance } from 'axios';
 
-// Chatbot-specific NVIDIA configuration - use same config as main pipeline
-const CHATBOT_API_KEY = process.env.NVIDIA_CHATBOT_API_KEY || process.env.NVIDIA_API_KEY;
+// Chatbot NVIDIA configuration - EXACT match with nvidia-config.yaml
+// provider: openai
+// model: nvidia/nvidia-nemotron-nano-9b-v2
+// apiBase: https://integrate.api.nvidia.com/v1
+const CHATBOT_API_KEY = process.env.NVIDIA_API_KEY; // Use main NVIDIA_API_KEY only
 const CHATBOT_API_BASE = 'https://integrate.api.nvidia.com/v1';
-// Use the same model as main pipeline to avoid 403 issues
-const CHATBOT_MODEL = process.env.NVIDIA_MODEL || 'nvidia/nvidia-nemotron-nano-9b-v2';
+const CHATBOT_MODEL = 'nvidia/nvidia-nemotron-nano-9b-v2'; // Exact model from config
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -78,10 +80,11 @@ Remember: Your goal is to help Indian job seekers navigate the government recrui
 
 /**
  * Create NVIDIA API client for chatbot
+ * Uses OpenAI-compatible API as per nvidia-config.yaml
  */
 function createChatbotClient(): AxiosInstance {
   if (!CHATBOT_API_KEY) {
-    throw new Error('NVIDIA Chatbot API key not configured. Set NVIDIA_CHATBOT_API_KEY in environment.');
+    throw new Error('NVIDIA API key not configured. Set NVIDIA_API_KEY in environment.');
   }
 
   return axios.create({
