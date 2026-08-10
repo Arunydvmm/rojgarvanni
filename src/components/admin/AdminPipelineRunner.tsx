@@ -83,6 +83,14 @@ export const AdminPipelineRunner: React.FC<AdminPipelineRunnerProps> = ({ token,
   const [totalMs, setTotalMs] = useState<number | null>(null);
   const [finalQaStatus, setFinalQaStatus] = useState<string | null>(null);
 
+  // Failed pipeline sessions state
+  const [failedSessions, setFailedSessions] = useState<any[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<any | null>(null);
+  const [fixData, setFixData] = useState<string>('');
+  const [adminNotes, setAdminNotes] = useState<string>('');
+  const [isFixing, setIsFixing] = useState(false);
+
   // NVIDIA connection state
   const [nvidiaOk, setNvidiaOk] = useState<boolean | null>(null);
   const [nvidiaChecking, setNvidiaChecking] = useState(false);
@@ -103,6 +111,30 @@ export const AdminPipelineRunner: React.FC<AdminPipelineRunnerProps> = ({ token,
   }
 
   useEffect(() => { checkNvidia(); }, []);
+
+  async function loadFailedSessions() {
+    setLoadingSessions(true);
+    try {
+      const res = await fetch('/api/admin/pipeline/sessions', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Filter for BLOCKED_REVIEW sessions
+        const blocked = data.sessions.filter((s: any) => s.current_status === 'BLOCKED_REVIEW');
+        setFailedSessions(blocked);
+      }
+    } catch (error) {
+      console.error('Failed to load pipeline sessions:', error);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }
+
+  useEffect(() => {
+    checkNvidia();
+    loadFailedSessions();
+  }, []);
 
   function resetStages() {
     setStages(PIPELINE_STAGES.map((s) => ({ ...s, status: 'pending' })));
@@ -188,6 +220,49 @@ export const AdminPipelineRunner: React.FC<AdminPipelineRunnerProps> = ({ token,
       setError('Connection error — check server and NVIDIA API key.');
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function handleFixSession() {
+    if (!selectedSession || !fixData.trim()) {
+      alert('Please provide the fixed data in JSON format');
+      return;
+    }
+
+    setIsFixing(true);
+    try {
+      // Parse the fix data to validate JSON
+      const parsedData = JSON.parse(fixData);
+
+      const res = await fetch(`/api/admin/pipeline/sessions/${selectedSession.id}/fix`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          agentIndex: selectedSession.current_agent_index,
+          fixedData: parsedData,
+          adminNotes: adminNotes || 'Admin manually fixed and resumed',
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        alert('✓ Pipeline fixed and resumed successfully!');
+        setSelectedSession(null);
+        setFixData('');
+        setAdminNotes('');
+        loadFailedSessions();
+        onRefreshJobs();
+      } else {
+        alert(`Failed to fix pipeline: ${data.message}`);
+      }
+    } catch (error: any) {
+      console.error('Fix error:', error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsFixing(false);
     }
   }
 
@@ -392,6 +467,136 @@ export const AdminPipelineRunner: React.FC<AdminPipelineRunnerProps> = ({ token,
           ))}
         </div>
       </div>
+
+      {/* Failed Pipeline Sessions Section */}
+      {failedSessions.length > 0 && (
+        <div className="bg-slate-950 rounded-2xl border border-red-500/30 p-5 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 className="font-bold text-white text-sm flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              Failed Pipelines Requiring Admin Review ({failedSessions.length})
+            </h3>
+            <button
+              onClick={loadFailedSessions}
+              disabled={loadingSessions}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg"
+            >
+              {loadingSessions ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {failedSessions.map((session) => (
+              <div
+                key={session.id}
+                className="bg-slate-900 border border-red-500/20 rounded-xl p-4 space-y-2"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <p className="font-bold text-white text-sm">{session.source_name}</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Failed at: <span className="text-red-400 font-semibold">{session.failed_agent}</span>
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      Reason: {session.failure_reason || 'Unknown error'}
+                    </p>
+                    <p className="text-xs text-slate-500 font-mono mt-1">
+                      Session ID: {session.id}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSelectedSession(session);
+                      setFixData(JSON.stringify(session.current_draft || {}, null, 2));
+                      setAdminNotes('');
+                    }}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-xs"
+                  >
+                    Fix & Resume
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Fix Session Modal */}
+      {selectedSession && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 max-w-4xl w-full max-h-[90vh] overflow-auto">
+            <div className="sticky top-0 bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between">
+              <h3 className="font-bold text-white text-lg">Fix Failed Pipeline</h3>
+              <button
+                onClick={() => {
+                  setSelectedSession(null);
+                  setFixData('');
+                  setAdminNotes('');
+                }}
+                className="text-slate-400 hover:text-white"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+                <p className="text-sm font-bold text-red-400 mb-2">Pipeline Failed At:</p>
+                <p className="text-white font-semibold">{selectedSession.failed_agent}</p>
+                <p className="text-xs text-slate-400 mt-2">
+                  {selectedSession.failure_reason}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-2">
+                  Edit the data below and click "Fix & Resume" to continue the pipeline
+                </label>
+                <textarea
+                  value={fixData}
+                  onChange={(e) => setFixData(e.target.value)}
+                  rows={15}
+                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Enter corrected JSON data..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-2">
+                  Admin Notes (optional)
+                </label>
+                <textarea
+                  value={adminNotes}
+                  onChange={(e) => setAdminNotes(e.target.value)}
+                  rows={3}
+                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Document what you fixed..."
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleFixSession}
+                  disabled={isFixing}
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-bold rounded-xl"
+                >
+                  {isFixing ? 'Fixing & Resuming...' : 'Fix & Resume Pipeline'}
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedSession(null);
+                    setFixData('');
+                    setAdminNotes('');
+                  }}
+                  className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

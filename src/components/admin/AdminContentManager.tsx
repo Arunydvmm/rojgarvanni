@@ -17,6 +17,41 @@ export const AdminContentManager: React.FC<AdminContentManagerProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'PUBLISHED' | 'DRAFTS'>('ALL');
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+
+  const handleDelete = async (jobId: string, jobTitle: string) => {
+    if (!confirm(`Are you sure you want to DELETE this article?\n\n"${jobTitle}"\n\nThis action cannot be undone.`)) {
+      return;
+    }
+
+    setIsDeleting(jobId);
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete article');
+      }
+
+      alert('✓ Article deleted successfully');
+      onRefresh();
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('Failed to delete article. Please try again.');
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+
+  const handleEdit = (job: GovtJob) => {
+    // Convert published job to draft for editing
+    onSelectDraft(job);
+  };
 
   const filteredJobs = jobs.filter((j) => {
     if (filterType === 'PUBLISHED' && j.isDraft) return false;
@@ -142,7 +177,25 @@ export const AdminContentManager: React.FC<AdminContentManagerProps> = ({
                         Inspect Draft
                       </button>
                     ) : (
-                      <span className="text-slate-500 text-[11px]">Verified & Live</span>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleEdit(j)}
+                          className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg text-xs shadow-xs flex items-center gap-1"
+                          title="Edit this article"
+                        >
+                          <Edit className="w-3 h-3" />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(j.id, j.title)}
+                          disabled={isDeleting === j.id}
+                          className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white font-bold rounded-lg text-xs shadow-xs flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Delete this article"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          {isDeleting === j.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
