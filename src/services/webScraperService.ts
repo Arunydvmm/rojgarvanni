@@ -268,6 +268,13 @@ export class SarkariResultScraper {
   }
 
   /**
+   * Alias for fetchLatestJobs (called via /api/admin/scraper/test endpoint)
+   */
+  async scrapeJobs(): Promise<ScraperResult> {
+    return this.fetchLatestJobs();
+  }
+
+  /**
    * Fetch latest jobs from RapidAPI
    */
   async fetchLatestJobs(): Promise<ScraperResult> {

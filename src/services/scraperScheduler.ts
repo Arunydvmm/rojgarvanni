@@ -346,6 +346,86 @@ export class ScraperScheduler {
       return false;
     }
   }
+
+  /**
+   * Run scraper manually (triggered by admin via API)
+   */
+  async runManually(): Promise<{ success: boolean; result?: any; error?: string }> {
+    try {
+      console.log('[Scheduler] Admin triggered manual scraper run');
+      if (this.isProcessing) {
+        return {
+          success: false,
+          error: 'Scraper is already processing. Please wait for current run to complete.'
+        };
+      }
+
+      this.isProcessing = true;
+      const startTime = Date.now();
+
+      try {
+        if (!isDatabaseAvailable()) {
+          throw new Error('Database is not available');
+        }
+
+        // Fetch from API
+        const result = await this.runScraperWithRetry();
+
+        // Process through pipeline
+        await this.processScraperResults(result);
+
+        this.stats.totalRuns++;
+        this.stats.lastRun = new Date();
+        this.stats.lastSuccess = new Date();
+        this.stats.successfulRuns++;
+        this.stats.totalJobsScraped += result.jobsFound;
+
+        console.log(`[Scheduler] ✓ Manual run complete in ${Date.now() - startTime}ms`);
+
+        return {
+          success: true,
+          result: {
+            jobsFound: result.jobsFound,
+            jobsProcessed: result.jobs.length,
+            duration: Date.now() - startTime,
+            timestamp: new Date().toISOString()
+          }
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        this.stats.lastError = errorMsg;
+        this.stats.failedRuns++;
+
+        console.error(`[Scheduler] ✗ Manual run failed: ${errorMsg}`);
+
+        return {
+          success: false,
+          error: errorMsg
+        };
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Get scheduler info (for admin dashboard)
+   */
+  getInfo() {
+    return {
+      isRunning: this.stats.isRunning,
+      interval: this.config.interval,
+      lastRun: this.stats.lastRun,
+      lastSuccess: this.stats.lastSuccess,
+      lastError: this.stats.lastError,
+      totalRuns: this.stats.totalRuns,
+      successfulRuns: this.stats.successfulRuns,
+      failedRuns: this.stats.failedRuns,
+      totalJobsScraped: this.stats.totalJobsScraped,
+      totalJobsPublished: this.stats.totalJobsPublished,
+      nextRun: this.stats.nextRun
+    };
+  }
 }
 
 // Export singleton
