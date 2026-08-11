@@ -12,17 +12,11 @@ interface AgentStepStatus {
 }
 
 const PIPELINE_STAGES: Omit<AgentStepStatus, 'status'>[] = [
-  { id: 'DISCOVERY',      label: 'Discovery Agent'            },
-  { id: 'CLASSIFICATION', label: 'Classification Agent'       },
-  { id: 'EXTRACTION',     label: 'Extraction Agent'           },
-  { id: 'NORMALIZATION',  label: 'Normalization Agent'        },
-  { id: 'DUPLICATE',      label: 'Duplicate Detection Agent'  },
-  { id: 'ENRICHMENT',     label: 'Enrichment Agent'           },
-  { id: 'CONTENT',        label: 'Content Agent'              },
-  { id: 'SEO',            label: 'SEO Agent'                  },
-  { id: 'VERIFICATION',   label: 'Verification Agent'         },
-  { id: 'QUALITY_CONTROL','label': 'Quality Control Agent'    },
-  { id: 'FINAL_QA',       label: 'Final QA Agent'             },
+  { id: 'DISCOVERY',      label: '1. Discovery - Verify job notification'     },
+  { id: 'EXTRACTION',     label: '2. Extraction - Extract key data'           },
+  { id: 'CONTENT',        label: '3. Content - Generate overview'             },
+  { id: 'SEO',            label: '4. SEO - Optimize metadata'                 },
+  { id: 'FINAL_QA',       label: '5. Final QA - Quality check & publish'     },
 ];
 
 const SAMPLE_NOTICES = [

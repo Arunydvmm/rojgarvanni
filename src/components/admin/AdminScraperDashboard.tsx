@@ -82,7 +82,7 @@ export const AdminScraperDashboard: React.FC = () => {
       });
       const data = await response.json();
       if (data.success) {
-        setSuccessMessage(`✓ Scraper executed successfully! Found ${data.data.jobsFound} jobs, processed ${data.data.jobsProcessed} new drafts.`);
+        setSuccessMessage(`✓ API fetch complete! Found ${data.data.jobsFound} jobs, published ${data.data.jobsProcessed} articles via AI pipeline.`);
         setTimeout(() => fetchScraperStatus(), 1000);
       } else {
         setError(data.message || 'Failed to run scraper');
@@ -192,8 +192,8 @@ export const AdminScraperDashboard: React.FC = () => {
             <Globe className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-100">Web Scraper Dashboard</h1>
-            <p className="text-sm text-slate-400">Automated scraping from sarkariresult.com (Every 15 minutes)</p>
+            <h1 className="text-2xl font-bold text-slate-100">RapidAPI Scraper Dashboard</h1>
+            <p className="text-sm text-slate-400">API: RapidAPI → 5-Stage AI Pipeline → Direct Publication (Every 15 minutes)</p>
           </div>
         </div>
         <button
@@ -280,7 +280,7 @@ export const AdminScraperDashboard: React.FC = () => {
         {/* Data Processed Card */}
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-slate-300">Data Processed</h3>
+            <h3 className="text-sm font-semibold text-slate-300">Articles Published</h3>
             <Download className="w-5 h-5 text-slate-500" />
           </div>
           <div className="space-y-2">
@@ -289,8 +289,8 @@ export const AdminScraperDashboard: React.FC = () => {
               <p className="text-2xl font-bold text-blue-400">{stats?.totalJobsScraped || 0}</p>
             </div>
             <div>
-              <p className="text-xs text-slate-400">Drafts Created</p>
-              <p className="text-2xl font-bold text-green-400">{stats?.totalJobsProcessed || 0}</p>
+              <p className="text-xs text-slate-400">Articles Published</p>
+              <p className="text-2xl font-bold text-green-400">{stats?.totalJobsPublished || 0}</p>
             </div>
           </div>
         </div>
@@ -388,8 +388,8 @@ export const AdminScraperDashboard: React.FC = () => {
               <p className="text-2xl font-bold text-red-400">{stats?.failedRuns || 0}</p>
             </div>
             <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Jobs Processed</p>
-              <p className="text-2xl font-bold text-blue-400">{stats?.totalJobsProcessed || 0}</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Articles Published</p>
+              <p className="text-2xl font-bold text-blue-400">{stats?.totalJobsPublished || 0}</p>
             </div>
           </div>
         </div>
@@ -398,9 +398,9 @@ export const AdminScraperDashboard: React.FC = () => {
       {/* Info Box */}
       <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
         <p className="text-sm text-blue-300">
-          <strong>ℹ️ About Web Scraper:</strong> The automated scraper fetches job postings from sarkariresult.com every 15 minutes.
-          New jobs are automatically converted to drafts and sent through the AI verification pipeline before appearing on the public portal.
-          All scraped data is logged and can be monitored from this dashboard.
+          <strong>ℹ️ About RapidAPI Scraper:</strong> Fetches jobs from RapidAPI Sarkari Result API every 15 minutes (1000 requests/month limit).
+          Jobs are sent through a simplified 5-stage AI pipeline (DISCOVERY → EXTRACTION → CONTENT → SEO → FINAL_QA) with automatic fallbacks.
+          Each job is published directly as a live article - no manual admin review needed. All articles appear instantly to candidates.
         </p>
       </div>
     </div>
